@@ -3,6 +3,7 @@ const path = require('path');
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const net = require('net');
+const { normalizePublicHttpUrl } = require('../utils/urlSafety');
 
 function normalizeIp(value) {
   let ip = String(value || '').trim().toLowerCase().replace(/^"|"$/g, '').replace(/^::ffff:/, '');
@@ -163,8 +164,8 @@ function createImStatusEvent(user) {
 }
 
 function getImPublicUrl() {
-  const value = String(process.env.IM_PUBLIC_URL || '').trim().replace(/\/$/, '');
-  return value || null;
+  const result = normalizePublicHttpUrl(process.env.IM_PUBLIC_URL, { allowEmpty: true, maxLength: 500 });
+  return result.ok && result.value ? result.value.replace(/\/$/, '') : null;
 }
 
 module.exports = { createImTicket, createImStatusEvent, getImPublicUrl, verifyImStatusToken };

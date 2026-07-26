@@ -50,6 +50,7 @@ _start() {
         cat > "$MAINTENANCE_DIR/index.html" <<'HTMLEOF'
 <!DOCTYPE html><html lang="zh-CN"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="refresh" content="10">
 <title>系统维护中 - 编程狗</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
@@ -68,7 +69,6 @@ h1{font-size:28px;margin-bottom:16px}.msg{font-size:16px;opacity:.9;margin-botto
 <p class="msg">系统正在升级维护，请稍后再试...<br>预计很快完成，感谢您的耐心等待</p>
 <div class="bar"><i></i></div><p class="tip">页面将自动刷新</p>
 </div>
-<script>setInterval(()=>{fetch("/api/health").then(r=>{if(r.ok)window.location.reload()}).catch(()=>{})},10000)</script>
 </body></html>
 HTMLEOF
     fi
@@ -79,6 +79,11 @@ HTMLEOF
     python3 -c "
 import http.server, socketserver, os
 class H(http.server.SimpleHTTPRequestHandler):
+    def end_headers(self):
+        self.send_header('Content-Security-Policy', \"default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'\")
+        self.send_header('X-Content-Type-Options', 'nosniff')
+        self.send_header('X-Frame-Options', 'DENY')
+        super().end_headers()
     def log_message(self, fmt, *args): pass  # suppress logs
 class Server(http.server.ThreadingHTTPServer):
     allow_reuse_address = True

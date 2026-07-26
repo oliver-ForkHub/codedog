@@ -65,6 +65,16 @@ check(appVue.includes('result?.verified'), 'app should only accept successful hC
 const homeVue = read('client/src/views/Home.vue');
 check(homeVue.includes('safeBanners') && homeVue.includes('rel="noopener noreferrer"'), 'home banners should sanitize URLs and use noopener.');
 
+const maintenanceMiddleware = read('server/middleware/maintenance.js');
+check(maintenanceMiddleware.includes('escapeHtml(customMsg') && !maintenanceMiddleware.includes('href="javascript:'), 'maintenance HTML should escape custom messages and avoid javascript URLs.');
+check(app.indexOf('setSecurityHeaders(res);') < app.indexOf('app.use(maintenanceMiddleware);'), 'maintenance responses should receive the standard security headers.');
+
+const developerController = read('server/controllers/developerController.js');
+check(developerController.includes("validateDeveloperUrl(homepage_url") && developerController.includes("validateDeveloperUrl(logo_url"), 'developer homepage and logo URLs should be validated before storage.');
+
+const imSso = read('server/services/imSso.js');
+check(imSso.includes('normalizePublicHttpUrl(process.env.IM_PUBLIC_URL'), 'IM navigation should only use a validated public HTTP(S) URL.');
+
 const workDetailVue = read('client/src/views/WorkDetail.vue');
 check(workDetailVue.includes('sandbox="allow-scripts allow-same-origin allow-forms allow-popups"'), 'work preview iframe should be sandboxed.');
 check(workDetailVue.includes('allowedPlayerHosts') && workDetailVue.includes("url.protocol !== 'https:'"), 'work preview URLs should be allow-listed HTTPS player URLs.');

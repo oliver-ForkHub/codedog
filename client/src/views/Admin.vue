@@ -1147,13 +1147,14 @@
             <el-table-column prop="id" label="ID" width="60" />
             <el-table-column label="图片" width="150">
               <template #default="{ row }">
-                <img :src="row.image_url" style="width: 120px; height: 60px; object-fit: cover; border-radius: 4px;" referrerpolicy="no-referrer" />
+                <img v-if="getSafeExternalUrl(row.image_url)" :src="getSafeExternalUrl(row.image_url)" style="width: 120px; height: 60px; object-fit: cover; border-radius: 4px;" referrerpolicy="no-referrer" />
               </template>
             </el-table-column>
             <el-table-column prop="title" label="标题" min-width="150" />
             <el-table-column prop="link_url" label="链接" min-width="200">
               <template #default="{ row }">
-                <a :href="row.link_url" target="_blank" style="color: #409eff;">{{ row.link_url }}</a>
+                <a v-if="getSafeExternalUrl(row.link_url)" :href="getSafeExternalUrl(row.link_url)" target="_blank" rel="noopener noreferrer" style="color: #409eff;">{{ row.link_url }}</a>
+                <span v-else>{{ row.link_url || '-' }}</span>
               </template>
             </el-table-column>
             <el-table-column prop="sort" label="排序" width="80" />
@@ -1513,7 +1514,8 @@
                 <el-descriptions-item label="所有者">{{ developerAppDetail.owner?.nickname || developerAppDetail.owner?.username || developerAppDetail.owner_user_id }}</el-descriptions-item>
                 <el-descriptions-item label="Client ID"><code>{{ developerAppDetail.client_id }}</code></el-descriptions-item>
                 <el-descriptions-item label="主页" :span="2">
-                  <a v-if="developerAppDetail.homepage_url" :href="developerAppDetail.homepage_url" target="_blank" rel="noopener">{{ developerAppDetail.homepage_url }}</a>
+                  <a v-if="getSafeExternalUrl(developerAppDetail.homepage_url)" :href="getSafeExternalUrl(developerAppDetail.homepage_url)" target="_blank" rel="noopener noreferrer">{{ developerAppDetail.homepage_url }}</a>
+                  <span v-else-if="developerAppDetail.homepage_url">无效地址</span>
                   <span v-else>-</span>
                   <el-button v-if="developerAppDetail.homepage_url" link size="small" @click="copyText(developerAppDetail.homepage_url)" title="复制"><el-icon><CopyDocument /></el-icon></el-button>
                 </el-descriptions-item>
@@ -2684,6 +2686,16 @@ import Posts from './admin/Posts.vue'
 
 const router = useRouter()
 const userStore = useUserStore()
+
+const getSafeExternalUrl = (value) => {
+  if (!value) return ''
+  try {
+    const url = new URL(String(value))
+    return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password ? url.href : ''
+  } catch {
+    return ''
+  }
+}
 
 const activeMenu = ref('dashboard')
 const loadingStats = ref(false)
@@ -4506,7 +4518,8 @@ const handleMenuSelect = async (key) => {
     try {
       const popup = window.open('about:blank', '_blank')
       const res = await imApi.createSsoTicket({ action: 'admin' })
-      if (res.code === 200 && res.data?.url) popup ? (popup.location.href = res.data.url) : window.open(res.data.url, '_blank', 'noopener,noreferrer')
+      const safeUrl = getSafeExternalUrl(res.data?.url)
+      if (res.code === 200 && safeUrl) popup ? (popup.location.href = safeUrl) : window.open(safeUrl, '_blank', 'noopener,noreferrer')
       else { popup?.close(); ElMessage.warning(res.msg || '即时通讯后台暂不可用') }
     } catch (error) { ElMessage.error(error.response?.data?.msg || '无法进入即时通讯后台') }
     return

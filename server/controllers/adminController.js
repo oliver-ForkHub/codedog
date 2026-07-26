@@ -24,6 +24,7 @@ const { safeLog } = require('../utils/safeLog');
 const { buildCodemaoPlayerUrl } = require('../utils/codemaoPlayer');
 // 修复: token 写 httpOnly cookie 防止 XSS 偷
 const { setTokenCookie } = require('../middleware/auth');
+const { normalizeHttpUrl } = require('../utils/urlSafety');
 
 // 爬取日志存储
 const crawlLogs = new Map();
@@ -2091,10 +2092,18 @@ async function crawlBanners(req, res) {
             const item = items[i];
             console.log(`处理轮播图${i + 1}:`, item);
             try {
+                const rawImageUrl = item.background_url || item.image_url || item.cover || item.picture || item.image || item.src;
+                const rawLinkUrl = item.target_url || item.link_url || item.url || item.link || '';
+                const imageResult = normalizeHttpUrl(rawImageUrl, { allowEmpty: false, maxLength: 500 });
+                const linkResult = normalizeHttpUrl(rawLinkUrl, { allowEmpty: true, maxLength: 500 });
+                if (!imageResult.ok || !linkResult.ok) {
+                    console.warn(`跳过URL不安全的轮播图${i + 1}`);
+                    continue;
+                }
                 const banner = await DbAdapter.create(Banner, {
                     title: item.title || item.name || item.text || `轮播图${i + 1}`,
-                    image_url: item.background_url || item.image_url || item.cover || item.picture || item.image || item.src,
-                    link_url: item.target_url || item.link_url || item.url || item.link || '',
+                    image_url: imageResult.value,
+                    link_url: linkResult.value,
                     sort: i,
                     is_active: true,
                     // H7修复: 标记来源为编程猫爬取，便于后续只清理爬取数据而不误删手工创建的轮播图
@@ -2151,11 +2160,15 @@ async function createBanner(req, res) {
         if (!image_url) {
             return errorResponse(res, '请提供图片URL', 400);
         }
+        const imageResult = normalizeHttpUrl(image_url, { allowEmpty: false, maxLength: 500 });
+        if (!imageResult.ok) return errorResponse(res, `轮播图片${imageResult.msg}`, 400);
+        const linkResult = normalizeHttpUrl(link_url, { allowEmpty: true, maxLength: 500 });
+        if (!linkResult.ok) return errorResponse(res, `轮播链接${linkResult.msg}`, 400);
         
         const banner = await DbAdapter.create(Banner, {
             title,
-            image_url,
-            link_url,
+            image_url: imageResult.value,
+            link_url: linkResult.value,
             sort: sort || 0,
             is_active: is_active !== false
         });
@@ -2184,8 +2197,16 @@ async function updateBanner(req, res) {
         
         const updateData = {};
         if (title !== undefined) updateData.title = title;
-        if (image_url !== undefined) updateData.image_url = image_url;
-        if (link_url !== undefined) updateData.link_url = link_url;
+        if (image_url !== undefined) {
+            const result = normalizeHttpUrl(image_url, { allowEmpty: false, maxLength: 500 });
+            if (!result.ok) return errorResponse(res, `轮播图片${result.msg}`, 400);
+            updateData.image_url = result.value;
+        }
+        if (link_url !== undefined) {
+            const result = normalizeHttpUrl(link_url, { allowEmpty: true, maxLength: 500 });
+            if (!result.ok) return errorResponse(res, `轮播链接${result.msg}`, 400);
+            updateData.link_url = result.value;
+        }
         if (sort !== undefined) updateData.sort = sort;
         if (is_active !== undefined) updateData.is_active = is_active;
         

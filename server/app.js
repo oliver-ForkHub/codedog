@@ -55,8 +55,8 @@ app.set('trust proxy', trustProxySetting);
 
 // Maintenance mode: intercept all requests when active
 const { isMaintenanceMode, maintenanceMiddleware } = require('./middleware/maintenance');
-if (isMaintenanceMode()) {
-    app.use(maintenanceMiddleware);
+const maintenanceActive = isMaintenanceMode();
+if (maintenanceActive) {
     console.log('⚠️  维护模式已开启 - Maintenance mode active');
 }
 
@@ -132,6 +132,10 @@ app.use((req, res, next) => {
     setSecurityHeaders(res);
     next();
 });
+
+if (maintenanceActive) {
+    app.use(maintenanceMiddleware);
+}
 
 const loginRateLimiter = createRateLimiter({
     windowMs: 15 * 60 * 1000,

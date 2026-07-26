@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="refresh" content="15">
 <title>系统维护中 - 编程狗</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
@@ -26,6 +27,5 @@ h1{font-size:28px;margin-bottom:16px;font-weight:600}
 <div class="progress"><div class="progress-bar"></div></div>
 <p class="retry">页面将自动刷新</p>
 </div>
-<script>setInterval(()=>{fetch('/api/health').then(r=>{if(r.ok)window.location.reload()}).catch(()=>{})},15000)</script>
 </body>
 </html>

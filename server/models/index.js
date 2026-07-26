@@ -19,6 +19,12 @@ require('dotenv').config();
 
 const { sequelize } = require('../config/database');
 const { DataTypes } = require('sequelize');
+const { normalizeHttpUrl } = require('../utils/urlSafety');
+
+function validateSafeHttpUrl(value) {
+    const result = normalizeHttpUrl(value, { allowEmpty: true, maxLength: 500 });
+    if (!result.ok) throw new Error(result.msg);
+}
 
 console.log('📦 加载Sequelize模型');
 
@@ -618,8 +624,8 @@ const Announcement = sequelize.define('Announcement', {
 const Banner = sequelize.define('Banner', {
     id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
     title: { type: DataTypes.STRING(200), allowNull: false },
-    image_url: { type: DataTypes.STRING(500), allowNull: false },
-    link_url: { type: DataTypes.STRING(500) },
+    image_url: { type: DataTypes.STRING(500), allowNull: false, validate: { validateSafeHttpUrl } },
+    link_url: { type: DataTypes.STRING(500), validate: { validateSafeHttpUrl } },
     sort: { type: DataTypes.INTEGER, defaultValue: 0 },
     is_active: { type: DataTypes.BOOLEAN, defaultValue: true },
     // 来源标识：'codemao' 表示编程猫爬取，'manual' 或 null 表示手工创建
@@ -878,8 +884,8 @@ const DeveloperApp = sequelize.define('DeveloperApp', {
     owner_user_id: { type: DataTypes.INTEGER, allowNull: false },
     name: { type: DataTypes.STRING(100), allowNull: false },
     description: { type: DataTypes.TEXT, allowNull: true },
-    homepage_url: { type: DataTypes.STRING(500), allowNull: true },
-    logo_url: { type: DataTypes.STRING(500), allowNull: true },
+    homepage_url: { type: DataTypes.STRING(500), allowNull: true, validate: { validateSafeHttpUrl } },
+    logo_url: { type: DataTypes.STRING(500), allowNull: true, validate: { validateSafeHttpUrl } },
     client_id: { type: DataTypes.STRING(64), allowNull: false, unique: true },
     client_secret_hash: { type: DataTypes.STRING(255), allowNull: false },
     redirect_uris: { type: DataTypes.TEXT, allowNull: false, defaultValue: '[]' },

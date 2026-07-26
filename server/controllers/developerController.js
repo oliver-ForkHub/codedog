@@ -22,6 +22,12 @@ const { createNotification } = require('./notificationController');
 const fs = require('fs');
 const crypto = require('crypto');
 const { uploadToImageHost } = require('../services/imageHost');
+const { normalizeHttpUrl } = require('../utils/urlSafety');
+
+function validateDeveloperUrl(value, label) {
+    const result = normalizeHttpUrl(value, { allowEmpty: true, maxLength: 500 });
+    return result.ok ? result : { ...result, msg: `${label}${result.msg}` };
+}
 
 function getOwnerId(req) {
     return DbAdapter.getId(req.user);
@@ -71,6 +77,10 @@ async function createApp(req, res) {
             ? oauth.normalizeRedirectUris(redirect_uris)
             : { ok: true, list: [] };
         if (!uris.ok) return errorResponse(res, uris.msg, 400);
+        const homepageResult = validateDeveloperUrl(homepage_url, '主页');
+        if (!homepageResult.ok) return errorResponse(res, homepageResult.msg, 400);
+        const logoResult = validateDeveloperUrl(logo_url, 'Logo');
+        if (!logoResult.ok) return errorResponse(res, logoResult.msg, 400);
 
         const clientId = oauth.randomToken('app_', 16);
         const clientSecret = oauth.randomToken('sk_', 24);
@@ -80,8 +90,8 @@ async function createApp(req, res) {
             owner_user_id: getOwnerId(req),
             name: trimmedName,
             description: description != null ? String(description).trim() : null,
-            homepage_url: homepage_url != null ? String(homepage_url).trim() : null,
-            logo_url: logo_url != null ? String(logo_url).trim() : null,
+            homepage_url: homepageResult.value,
+            logo_url: logoResult.value,
             client_id: clientId,
             client_secret_hash: clientSecretHash,
             redirect_uris: oauth.stringifyJsonField(uris.list),
@@ -125,8 +135,16 @@ async function updateApp(req, res) {
             updateData.name = n;
         }
         if (description !== undefined) updateData.description = description == null ? null : String(description).trim();
-        if (homepage_url !== undefined) updateData.homepage_url = homepage_url == null ? null : String(homepage_url).trim();
-        if (logo_url !== undefined) updateData.logo_url = logo_url == null ? null : String(logo_url).trim();
+        if (homepage_url !== undefined) {
+            const result = validateDeveloperUrl(homepage_url, '主页');
+            if (!result.ok) return errorResponse(res, result.msg, 400);
+            updateData.homepage_url = result.value;
+        }
+        if (logo_url !== undefined) {
+            const result = validateDeveloperUrl(logo_url, 'Logo');
+            if (!result.ok) return errorResponse(res, result.msg, 400);
+            updateData.logo_url = result.value;
+        }
 
         if (redirect_uris !== undefined) {
             const effectiveScopes = scopes !== undefined

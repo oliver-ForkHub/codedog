@@ -10,6 +10,7 @@
     "check:consistency": "node ../scripts/check-consistency.js",
     "security:attack": "node ../scripts/security-attack-test.js",
     "security:targeted": "node ../scripts/security-targeted-test.js",
+    "test:xss-boundaries": "node scripts/smoke-xss-boundaries.js",
     "test:migration": "node scripts/test-db-migration.js",
     "fix:ipban-dirty": "node scripts/fix-ipban-dirty-data.js",
     "toolbox": "node ../scripts/toolbox.js"

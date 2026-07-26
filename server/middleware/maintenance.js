@@ -5,6 +5,7 @@
  */
 const fs = require('fs');
 const path = require('path');
+const { escapeHtml } = require('../utils/security');
 
 const MAINTENANCE_FILE = path.join(__dirname, '..', '.maintenance');
 
@@ -41,9 +42,9 @@ function maintenanceMiddleware(req, res, next) {
     res.status(503).send(html);
 }
 
-function getMaintenancePage() {
-    const customMsg = getMaintenanceMessage();
-    const message = customMsg || '系统正在升级维护，请稍后再试...';
+function getMaintenancePage(customMessage = getMaintenanceMessage()) {
+    const customMsg = customMessage;
+    const message = escapeHtml(customMsg || '系统正在升级维护，请稍后再试...');
     return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -118,18 +119,10 @@ function getMaintenancePage() {
     <h1>系统维护中</h1>
     <p class="message">${message}</p>
     <div class="progress"><div class="progress-bar"></div></div>
-    <p class="retry">预计很快完成，请 <a href="javascript:location.reload()">点击刷新</a> 重试</p>
+    <p class="retry">预计很快完成，请 <a href="/">点击刷新</a> 重试</p>
   </div>
-  <script>
-    // Auto-retry every 30 seconds
-    setInterval(() => {
-      fetch('/api/health').then(r => {
-        if (r.ok) window.location.reload();
-      }).catch(() => {});
-    }, 30000);
-  </script>
 </body>
 </html>`;
 }
 
-module.exports = { isMaintenanceMode, maintenanceMiddleware, MAINTENANCE_FILE };
+module.exports = { isMaintenanceMode, maintenanceMiddleware, getMaintenancePage, MAINTENANCE_FILE };

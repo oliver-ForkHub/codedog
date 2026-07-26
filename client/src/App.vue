@@ -219,6 +219,16 @@ import { Search, EditPen, Bell, CaretBottom, User, Monitor, Star, Setting, Switc
 const router = useRouter()
 const route = useRoute()
 const userStore = useUserStore()
+
+const getSafeExternalUrl = (value) => {
+  if (!value) return ''
+  try {
+    const url = new URL(String(value))
+    return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password ? url.href : ''
+  } catch {
+    return ''
+  }
+}
 const notificationStore = useNotificationStore()
 const { unreadCount } = storeToRefs(notificationStore)
 const searchKeyword = ref('')
@@ -531,7 +541,8 @@ const handleSearch = () => {
 const openIm = async () => {
   try {
     const res = await imApi.createSsoTicket()
-    if (res.code === 200 && res.data?.url) window.open(res.data.url, '_blank', 'noopener,noreferrer')
+    const safeUrl = getSafeExternalUrl(res.data?.url)
+    if (res.code === 200 && safeUrl) window.open(safeUrl, '_blank', 'noopener,noreferrer')
     else ElMessage.warning(res.msg || '即时通讯系统暂不可用')
   } catch (error) {
     ElMessage.error(error.response?.data?.msg || '无法进入即时通讯系统')

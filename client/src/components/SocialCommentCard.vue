@@ -17,6 +17,13 @@ import { ElMessage } from 'element-plus'
 import { imApi } from '@/api/im'
 const props = defineProps({ content: { type:String, default:'' }, author: { type:Object, default:null } })
 const prefix = '[[codedog-social-card]]'
+const getSafeExternalUrl = (value) => {
+  if (!value) return ''
+  try {
+    const url = new URL(String(value))
+    return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password ? url.href : ''
+  } catch { return '' }
+}
 const card = computed(() => {
   if (!props.content.startsWith(prefix)) return null
   try { const value=JSON.parse(props.content.slice(prefix.length)); return ['user','group','studio'].includes(value.type) && Number(value.target_id)>0 ? value : null } catch { return null }
@@ -40,9 +47,10 @@ const openCard = async () => {
   try {
     const action = card.value.type === 'user' ? { action:'direct', user_id:Number(card.value.target_id) } : { action:'group', group_id:Number(card.value.target_id) }
     const res = await imApi.createSsoTicket(action)
-    if (res.code !== 200 || !res.data?.url) throw new Error(res.msg || '即时通讯暂不可用')
-    if (popup) popup.location.href = res.data.url
-    else window.open(res.data.url, '_blank', 'noopener,noreferrer')
+    const safeUrl = getSafeExternalUrl(res.data?.url)
+    if (res.code !== 200 || !safeUrl) throw new Error(res.msg || '即时通讯暂不可用')
+    if (popup) popup.location.href = safeUrl
+    else window.open(safeUrl, '_blank', 'noopener,noreferrer')
   } catch (error) { popup?.close(); ElMessage.error(error.response?.data?.msg || error.message || '无法打开卡片') }
 }
 </script>

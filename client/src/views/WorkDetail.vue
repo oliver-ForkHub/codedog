@@ -8,6 +8,9 @@
             v-if="playerUrl"
             :src="playerUrl"
             class="r-work--player"
+            ref="playerFrameRef"
+            @focus="setPlayerFocused(true)"
+            @blur="setPlayerFocused(false)"
             sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
             referrerpolicy="no-referrer"
             allowfullscreen
@@ -353,6 +356,7 @@ const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 const loading = ref(true)
+const playerFrameRef = ref(null)
 
 const renderedDescription = computed(() => {
   if (!work.value?.description) return '暂无描述'
@@ -1045,15 +1049,51 @@ const preventScroll = (e) => {
   }
 }
 
-watch(() => route.params.codemaoId, fetchWork)
+let playerFocused = false
+let previousDocumentOverflow = ''
+
+const setPlayerFocused = (focused) => {
+  if (playerFocused === focused) return
+  playerFocused = focused
+
+  if (focused) {
+    previousDocumentOverflow = document.documentElement.style.overflow
+    document.documentElement.style.overflow = 'hidden'
+    return
+  }
+
+  document.documentElement.style.overflow = previousDocumentOverflow
+}
+
+const detectPlayerFocus = () => {
+  // 跨域 iframe 内的 keydown 不会冒泡到父页面；窗口失焦后检查 activeElement，
+  // 确认焦点进入播放器时锁住外层滚动，让方向键只作用于游戏。
+  window.setTimeout(() => {
+    setPlayerFocused(document.activeElement === playerFrameRef.value)
+  }, 0)
+}
+
+const releasePlayerFocus = () => {
+  setPlayerFocused(false)
+}
+
+watch(() => route.params.codemaoId, () => {
+  releasePlayerFocus()
+  fetchWork()
+})
 onMounted(() => {
   fetchWork()
   fetchGeetestConfig()
   window.addEventListener('keydown', preventScroll, { passive: false })
+  window.addEventListener('blur', detectPlayerFocus)
+  window.addEventListener('focus', detectPlayerFocus)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', preventScroll)
+  window.removeEventListener('blur', detectPlayerFocus)
+  window.removeEventListener('focus', detectPlayerFocus)
+  releasePlayerFocus()
 })
 const selectSocialCard = async type => {
   if (type === 'user') { selectedSocialCard.value = { type:'user' }; return }

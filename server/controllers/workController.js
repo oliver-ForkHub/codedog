@@ -192,8 +192,14 @@ async function publishWork(req, res) {
             return errorResponse(res, '获取作品信息失败，请检查作品ID是否正确或作品是否公开', 400);
         }
 
-        // 校验作品作者归属：只有作品作者本人才能发布
-        if (!workInfo.codemaoAuthorId || String(workInfo.codemaoAuthorId) !== String(req.user.codemao_user_id)) {
+        const isOwnWork = workInfo.codemaoAuthorId
+            && String(workInfo.codemaoAuthorId) === String(req.user.codemao_user_id);
+        const canPublishOthers = isRoleAtLeast(req.user.role, 'admin');
+
+        // 普通用户只能发布本人作品；管理员可代发布任意公开作品。
+        // 代发布作品在编程狗站内归执行操作的管理员，编程猫原作者信息仍保存在
+        // codemao_author_id / codemao_author_name 来源字段中。
+        if (!isOwnWork && !canPublishOthers) {
             return errorResponse(res, '只能发布自己的编程猫作品', 403);
         }
 

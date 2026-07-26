@@ -68,6 +68,15 @@ check(homeVue.includes('safeBanners') && homeVue.includes('rel="noopener norefer
 const workDetailVue = read('client/src/views/WorkDetail.vue');
 check(workDetailVue.includes('sandbox="allow-scripts allow-same-origin allow-forms allow-popups"'), 'work preview iframe should be sandboxed.');
 check(workDetailVue.includes('allowedPlayerHosts') && workDetailVue.includes("url.protocol !== 'https:'"), 'work preview URLs should be allow-listed HTTPS player URLs.');
+check(workDetailVue.includes("ALLOWED_TAGS: ['p', 'br', 'strong'") && workDetailVue.includes("FORBID_TAGS: ['img']"), 'work descriptions should use a strict HTML allow-list and forbid images.');
+check(workDetailVue.includes('WORK_DESCRIPTION_MAX_LENGTH = 10000'), 'work descriptions should be capped before Markdown rendering.');
+check(workDetailVue.includes('r-work--description_toggle') && workDetailVue.includes('shouldCollapseDescription'), 'long work descriptions should be collapsible.');
+
+const modelsSource = read('server/models/index.js');
+const workModelStart = modelsSource.indexOf("const Work = sequelize.define('Work'");
+const workModelEnd = modelsSource.indexOf("const Comment = sequelize.define('Comment'", workModelStart);
+const workModelSection = modelsSource.slice(workModelStart, workModelEnd);
+check(workModelSection.includes('args: [0, 10000]'), 'the Work model should reject descriptions longer than 10000 characters.');
 check(workDetailVue.includes('isValidCodemaoWorkId') && workDetailVue.includes('作品ID格式不正确'), 'work detail should reject invalid Codemao IDs before API calls.');
 
 const hcaptchaDialog = read('client/src/components/HCaptchaDialog.vue');

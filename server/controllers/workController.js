@@ -1020,8 +1020,8 @@ async function updateWork(req, res) {
             return errorResponse(res, '名称不能超过200字', 400);
         }
 
-        if (description !== undefined && String(description).length > 5000) {
-            return errorResponse(res, '描述不能超过5000字', 400);
+        if (description !== undefined && String(description).length > 10000) {
+            return errorResponse(res, '作品简介不能超过10000字', 400);
         }
 
         if (preview !== undefined && String(preview).length > 500) {
@@ -1030,7 +1030,7 @@ async function updateWork(req, res) {
 
         const updateData = {};
         if (name !== undefined) updateData.name = String(name).substring(0, 200);
-        if (description !== undefined) updateData.description = String(description).substring(0, 5000);
+        if (description !== undefined) updateData.description = String(description);
         if (preview !== undefined) updateData.preview = String(preview).substring(0, 500);
 
         // 修复: 拒绝空/空白作品名（trim 后为空视为无效），避免落库空名

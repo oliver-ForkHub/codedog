@@ -62,7 +62,15 @@ const Work = sequelize.define('Work', {
     id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
     codemao_work_id: { type: DataTypes.STRING(50), unique: true },
     name: { type: DataTypes.STRING(200), allowNull: false },
-    description: { type: DataTypes.TEXT },
+    description: {
+        type: DataTypes.TEXT,
+        validate: {
+            len: {
+                args: [0, 10000],
+                msg: '作品简介不能超过10000字'
+            }
+        }
+    },
     preview: { type: DataTypes.STRING(500) },
     type: { type: DataTypes.STRING(50) },
     ide_type: { type: DataTypes.STRING(50), defaultValue: 'KITTEN' },

@@ -26,7 +26,21 @@
       <div class="r-work--info_section">
         <div class="r-work--main_info">
           <h1 class="r-work--title">{{ work.name }}</h1>
-          <div class="r-work--desc markdown-body" v-html="renderedDescription"></div>
+          <div
+            class="r-work--description_wrapper"
+            :class="{ 'is-collapsed': shouldCollapseDescription && !descriptionExpanded }"
+          >
+            <div class="r-work--desc markdown-body" v-html="renderedDescription"></div>
+          </div>
+          <button
+            v-if="shouldCollapseDescription"
+            type="button"
+            class="r-work--description_toggle"
+            :aria-expanded="descriptionExpanded"
+            @click="descriptionExpanded = !descriptionExpanded"
+          >
+            {{ descriptionExpanded ? '收起简介' : '展开完整简介' }}
+          </button>
           
           <div class="r-work--meta">
             <div class="r-work--author" @click="goToAuthor">
@@ -357,15 +371,24 @@ const router = useRouter()
 const userStore = useUserStore()
 const loading = ref(true)
 const playerFrameRef = ref(null)
+const descriptionExpanded = ref(false)
+const WORK_DESCRIPTION_MAX_LENGTH = 10000
+
+const descriptionSource = computed(() => String(work.value?.description || '').slice(0, WORK_DESCRIPTION_MAX_LENGTH))
+const shouldCollapseDescription = computed(() => {
+  const source = descriptionSource.value
+  return source.length > 600 || (source.match(/\n/g)?.length || 0) > 8
+})
 
 const renderedDescription = computed(() => {
   if (!work.value?.description) return '暂无描述'
-  // 显式禁用危险标签/属性,防御 mxss(markup mutation XSS)绕过攻击。
-  // 默认 DOMPurify 已禁 onerror/onload 等,但某些 mXSS 变形 payload 仍可能绕过,
-  // 显式 FORBID_TAGS + FORBID_ATTR 是防御性深度。
-  return DOMPurify.sanitize(marked(work.value.description), {
-    FORBID_TAGS: ['style', 'form', 'input', 'iframe', 'object', 'embed', 'script'],
-    FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover', 'style', 'formaction']
+  // Markdown 本身不负责安全过滤；仅保留简介排版所需标签和链接属性。
+  // 图片明确禁止，事件、样式、表单和嵌入内容因不在白名单中一并移除。
+  return DOMPurify.sanitize(marked(descriptionSource.value), {
+    ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'del', 'h1', 'h2', 'h3', 'h4', 'ul', 'ol', 'li', 'blockquote', 'code', 'pre', 'a', 'hr'],
+    ALLOWED_ATTR: ['href', 'title'],
+    FORBID_TAGS: ['img'],
+    SANITIZE_NAMED_PROPS: true
   })
 })
 const loadingRelated = ref(false)
@@ -506,6 +529,7 @@ const isValidCodemaoWorkId = (value) => /^\d{1,20}$/.test(String(value || ''))
 
 const fetchWork = async () => {
   const codemaoId = String(route.params.codemaoId || '')
+  descriptionExpanded.value = false
   work.value = null
   comments.value = []
   relatedWorks.value = []
@@ -1190,7 +1214,69 @@ $border-color: #eee;
     font-size: 15px;
     color: $text-secondary;
     line-height: 1.8;
+    overflow-wrap: anywhere;
+
+    :deep(h1),
+    :deep(h2),
+    :deep(h3),
+    :deep(h4) {
+      line-height: 1.35;
+      margin: 18px 0 8px;
+    }
+
+    :deep(h1) { font-size: 1.55em; }
+    :deep(h2) { font-size: 1.35em; }
+    :deep(h3) { font-size: 1.2em; }
+    :deep(h4) { font-size: 1.08em; }
+
+    :deep(pre) {
+      max-width: 100%;
+      padding: 12px;
+      overflow-x: auto;
+      border-radius: 8px;
+      background: #f6f8fa;
+    }
+
+    :deep(a) {
+      color: $primary-color;
+      word-break: break-all;
+    }
+  }
+
+  .r-work--description_wrapper {
+    position: relative;
+    margin-bottom: 8px;
+
+    &.is-collapsed {
+      max-height: 250px;
+      overflow: hidden;
+
+      &::after {
+        content: '';
+        position: absolute;
+        right: 0;
+        bottom: 0;
+        left: 0;
+        height: 72px;
+        pointer-events: none;
+        background: linear-gradient(transparent, $white);
+      }
+    }
+  }
+
+  .r-work--description_toggle {
     margin: 0 0 20px;
+    padding: 4px 0;
+    border: 0;
+    color: $primary-color;
+    background: transparent;
+    cursor: pointer;
+    font: inherit;
+
+    &:hover,
+    &:focus-visible {
+      text-decoration: underline;
+    }
   }
   
   .r-work--meta {

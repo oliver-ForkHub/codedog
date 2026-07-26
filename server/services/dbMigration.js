@@ -572,7 +572,9 @@ class DatabaseMigration {
                     if (!v) return [];
                     if (Array.isArray(v)) return v;
                     try {
-                        const parsed = JSON.parse(v);
+                        let parsed = JSON.parse(v);
+                        // 兼容旧版本 RolePermission 更新路径产生的双重 JSON 编码。
+                        if (typeof parsed === 'string') parsed = JSON.parse(parsed);
                         return Array.isArray(parsed) ? parsed : [];
                     } catch (e) {
                         console.error('RolePermission(migration).permissions JSON.parse 失败，回退为空数组:', e.message);

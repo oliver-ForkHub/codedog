@@ -688,7 +688,9 @@ const RolePermission = sequelize.define('RolePermission', {
             if (!v) return [];
             if (Array.isArray(v)) return v;
             try {
-                const parsed = JSON.parse(v);
+                let parsed = JSON.parse(v);
+                // 兼容历史更新路径产生的双重 JSON 编码，避免已保存权限显示为空。
+                if (typeof parsed === 'string') parsed = JSON.parse(parsed);
                 return Array.isArray(parsed) ? parsed : [];
             } catch (e) {
                 console.error('RolePermission.permissions JSON.parse 失败，回退为空数组:', e.message);

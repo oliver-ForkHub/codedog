@@ -4214,17 +4214,14 @@ async function updateRolePermissions(req, res) {
         // 更新或创建角色权限
         let rolePerm = await DbAdapter.findOne(RolePermission, { where: { role } });
 
-        // (报告1 #14) RolePermission.permissions 以 TEXT 存储，模型 setter 在实例方法
-        // （create/build/save）路径上会 JSON.stringify 一次，getter 再 JSON.parse 还原。
-        // - create 分支走 DbAdapter.create → model.create（实例方法），setter 会触发，故传入数组即可。
-        // - update 分支走 DbAdapter.update → model.update（静态方法），不会触发实例 setter，
-        //   若直接传数组会以非 JSON 字符串写入 TEXT 列，读取时 getter JSON.parse 失败而回退为 []，
-        //   导致权限丢失。因此 update 分支必须手动 JSON.stringify，与 create 分支区别对待。
+        // RolePermission.permissions 的模型 setter 负责把数组序列化为 TEXT。
+        // Sequelize 的 Model.update 同样会执行 setter，因此更新和创建都必须传数组；
+        // 这里若预先 JSON.stringify，会被 setter 再序列化一次，读取时便会回退为空数组。
         if (rolePerm) {
             await DbAdapter.update(RolePermission, {
                 name: name || rolePerm.name,
                 level: level !== undefined ? level : rolePerm.level,
-                permissions: JSON.stringify(permissions || [])
+                permissions: permissions || []
             }, { where: { role } });
         } else {
             await DbAdapter.create(RolePermission, {

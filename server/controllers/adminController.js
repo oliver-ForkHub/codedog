@@ -1789,25 +1789,47 @@ async function crawlUserWorks(req, res) {
             return errorResponse(res, '该用户没有公开作品', 400);
         }
         
+        // 用户资料接口目前可能要求登录。先尝试该接口；若没有返回可用资料，
+        // 从第一件公开作品详情的 user_info 回退获取作者资料，并缓存该详情供后续爬取复用。
+        const prefetchedDetails = new Map();
+        let userInfo = await codemaoApi.getUserInfo(userId);
+        const hasUsableUserInfo = userInfo && typeof userInfo === 'object'
+            && (userInfo.nickname || userInfo.username || userInfo.description || codemaoApi.normalizeCodemaoAvatar(userInfo));
+        if (!hasUsableUserInfo) {
+            const firstItem = allItems[0];
+            const firstDetail = firstItem ? await codemaoApi.getWorkDetail(firstItem.id) : null;
+            if (firstDetail?.id) {
+                prefetchedDetails.set(String(firstDetail.id), firstDetail);
+            }
+            const detailAuthor = firstDetail?.user_info;
+            if (detailAuthor?.id != null && String(detailAuthor.id) === String(userId)) {
+                userInfo = detailAuthor;
+                console.log(`[crawlUserWorks] 用户资料接口不可用，已从作品 ${firstDetail.id} 的作者信息回退`);
+            } else {
+                userInfo = null;
+            }
+        }
+
+        const safeProfile = await sanitizeCodemaoProfile(
+            userInfo?.nickname || userInfo?.username,
+            userInfo?.description
+        );
+        const profileAvatar = codemaoApi.normalizeCodemaoAvatar(userInfo);
+        const placeholderNickname = `用户${userId}`;
+
         let user = await DbAdapter.findOne(User, { where: { codemao_user_id: String(userId) } });
         if (!user) {
             user = await DbAdapter.findOne(User, { where: { username: `codemao_${userId}` } });
         }
         if (!user) {
-            const userInfo = await codemaoApi.getUserInfo(userId);
             try {
-                // (报告1 #3) 占位用户 nickname/bio 走审核+转义，与 userController.codemaoLogin 一致
-                const safeProfile = await sanitizeCodemaoProfile(
-                    userInfo?.nickname || userInfo?.username,
-                    userInfo?.description
-                );
                 user = await DbAdapter.create(User, {
                     codemao_user_id: String(userId),
                     username: `codemao_${userId}`,
                     email: `codemao_${userId}@example.invalid`,
                     password: PLACEHOLDER_PASSWORD_HASH,
-                    nickname: safeProfile.nickname || `用户${userId}`,
-                    avatar: codemaoApi.normalizeCodemaoAvatar(userInfo),
+                    nickname: safeProfile.nickname || placeholderNickname,
+                    avatar: profileAvatar,
                     bio: safeProfile.bio,
                     role: 'user',
                     status: 'active'
@@ -1815,6 +1837,19 @@ async function crawlUserWorks(req, res) {
             } catch (createError) {
                 console.error('创建用户失败:', createError.message);
                 user = await DbAdapter.findOne(User, { where: { username: `codemao_${userId}` } });
+            }
+        } else if (userInfo) {
+            // 再次手动爬取时自动修复此前因资料接口失败产生的占位昵称、空头像和空简介；
+            // 已有的非占位资料不覆盖，保留用户或管理员后续修改。
+            const profileUpdates = {};
+            if (safeProfile.nickname && (!user.nickname || user.nickname === placeholderNickname)) {
+                profileUpdates.nickname = safeProfile.nickname;
+            }
+            if (profileAvatar && !user.avatar) profileUpdates.avatar = profileAvatar;
+            if (safeProfile.bio && !user.bio) profileUpdates.bio = safeProfile.bio;
+            if (!user.codemao_user_id) profileUpdates.codemao_user_id = String(userId);
+            if (Object.keys(profileUpdates).length > 0) {
+                await DbAdapter.update(User, profileUpdates, { where: { id: DbAdapter.getId(user) } });
             }
         }
         
@@ -1825,7 +1860,9 @@ async function crawlUserWorks(req, res) {
                 const existing = await DbAdapter.findOne(Work, { where: { codemao_work_id: item.id } });
                 if (existing) continue;
                 
-                const workDetail = await codemaoApi.getWorkDetail(item.id);
+                const detailKey = String(item.id);
+                const workDetail = prefetchedDetails.get(detailKey) || await codemaoApi.getWorkDetail(item.id);
+                prefetchedDetails.delete(detailKey);
                 if (!workDetail || !workDetail.id) continue;
                 
                 // 修复 PII/资源链接泄露: 改用 safeLog 自动脱敏 preview/player_url 等

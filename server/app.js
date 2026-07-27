@@ -107,8 +107,21 @@ const allowedOrigins = rawCorsOrigin
     .map(s => s.trim())
     .filter(Boolean);
 
-function isAllowedBrowserOrigin(requestOrigin) {
+function isSameHostBrowserOrigin(req, requestOrigin) {
+    try {
+        const originHost = new URL(requestOrigin).host.toLowerCase();
+        const requestHost = String(req.get('host') || '').trim().toLowerCase();
+        return Boolean(requestHost) && originHost === requestHost;
+    } catch (_) {
+        return false;
+    }
+}
+
+function isAllowedBrowserOrigin(req, requestOrigin) {
     if (!requestOrigin) return true;
+    // 同域请求不应依赖 CORS_ORIGIN。反向代理部署或更换站点域名时，浏览器
+    // Origin 与当前 Host 一致即可安全放行；真正跨域仍必须命中显式白名单。
+    if (isSameHostBrowserOrigin(req, requestOrigin)) return true;
     if (allowedOrigins.length === 0) {
         return !isProduction && /^https?:\/\/localhost(:\d+)?$/.test(requestOrigin);
     }
@@ -120,7 +133,7 @@ function isAllowedBrowserOrigin(requestOrigin) {
 app.use((req, res, next) => {
     const requestOrigin = req.header('Origin');
     const isUnsafeMethod = !['GET', 'HEAD', 'OPTIONS'].includes(req.method);
-    if (isUnsafeMethod && requestOrigin && !isAllowedBrowserOrigin(requestOrigin)) {
+    if (isUnsafeMethod && requestOrigin && !isAllowedBrowserOrigin(req, requestOrigin)) {
         return res.status(403).json({ code: 403, msg: 'Cross-origin request blocked', data: null });
     }
     return next();
@@ -128,7 +141,7 @@ app.use((req, res, next) => {
 
 app.use(cors((req, callback) => {
     const requestOrigin = req.header('Origin');
-    const allow = isAllowedBrowserOrigin(requestOrigin);
+    const allow = isAllowedBrowserOrigin(req, requestOrigin);
 
     callback(null, {
         origin: allow,

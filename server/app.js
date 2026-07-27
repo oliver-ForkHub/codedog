@@ -108,6 +108,11 @@ const allowedOrigins = rawCorsOrigin
     .filter(Boolean);
 
 function isSameHostBrowserOrigin(req, requestOrigin) {
+    // Sec-Fetch-Site is supplied by the browser and cannot be set by page
+    // JavaScript. It remains accurate even when a reverse proxy rewrites Host.
+    if (String(req.get('sec-fetch-site') || '').toLowerCase() === 'same-origin') {
+        return true;
+    }
     try {
         const originHost = new URL(requestOrigin).host.toLowerCase();
         const requestHost = String(req.get('host') || '').trim().toLowerCase();

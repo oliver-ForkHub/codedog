@@ -724,7 +724,7 @@ $shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
   min-width: 190px;
   max-width: 340px;
   
-  :deep(.el-input__wrapper) {
+  .el-input__wrapper {
     border-radius: 20px;
     background-color: #f5f5f5;
     box-shadow: none;
@@ -736,7 +736,7 @@ $shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
     }
   }
   
-  :deep(.el-input__inner) {
+  .el-input__inner {
     height: 36px;
   }
 }

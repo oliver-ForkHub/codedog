@@ -377,9 +377,9 @@ async function uploadAppLogo(req, res) {
         if (!app || !req.file) return errorResponse(res, '应用或图标不存在', 404);
         const logoUrl = await uploadToImageHost(req.file);
         await DbAdapter.update(DeveloperApp, { logo_url: logoUrl }, { where: { id: app.id } });
-        try { fs.unlinkSync(req.file.path); } catch (_) {}
         return successResponse(res, { logo_url: logoUrl }, '图标上传成功');
     } catch (e) { console.error('uploadAppLogo', e); return errorResponse(res, '上传应用图标失败', 500); }
+    finally { if (req.file?.path) await fs.promises.unlink(req.file.path).catch(() => {}); }
 }
 
 async function listMyAppCalls(req, res) {

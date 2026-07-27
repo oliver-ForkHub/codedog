@@ -107,19 +107,28 @@ const allowedOrigins = rawCorsOrigin
     .map(s => s.trim())
     .filter(Boolean);
 
+function isAllowedBrowserOrigin(requestOrigin) {
+    if (!requestOrigin) return true;
+    if (allowedOrigins.length === 0) {
+        return !isProduction && /^https?:\/\/localhost(:\d+)?$/.test(requestOrigin);
+    }
+    return allowedOrigins.includes(requestOrigin);
+}
+
+// CORS response headers alone do not prevent a browser from sending a state-changing
+// request. Reject explicit foreign/null origins before authentication or business logic.
+app.use((req, res, next) => {
+    const requestOrigin = req.header('Origin');
+    const isUnsafeMethod = !['GET', 'HEAD', 'OPTIONS'].includes(req.method);
+    if (isUnsafeMethod && requestOrigin && !isAllowedBrowserOrigin(requestOrigin)) {
+        return res.status(403).json({ code: 403, msg: 'Cross-origin request blocked', data: null });
+    }
+    return next();
+});
+
 app.use(cors((req, callback) => {
     const requestOrigin = req.header('Origin');
-    let allow = false;
-
-    if (!requestOrigin) {
-        // 非浏览器同源请求(如 curl、服务器间调用)无需校验 Origin
-        allow = true;
-    } else if (allowedOrigins.length === 0) {
-        // 未配置 CORS_ORIGIN：开发环境放行 localhost，生产环境拒绝
-        allow = !isProduction && /^https?:\/\/localhost(:\d+)?$/.test(requestOrigin);
-    } else {
-        allow = allowedOrigins.some(o => o === requestOrigin);
-    }
+    const allow = isAllowedBrowserOrigin(requestOrigin);
 
     callback(null, {
         origin: allow,
@@ -328,7 +337,8 @@ async function startServer() {
                     { type: sequelize.QueryTypes.SELECT }
                 );
                 for (const { name } of backupTables) {
-                    await sequelize.query(`DROP TABLE IF EXISTS "${name}"`);
+                    const quotedName = sequelize.getQueryInterface().queryGenerator.quoteIdentifier(name);
+                    await sequelize.query(`DROP TABLE IF EXISTS ${quotedName}`);
                     console.warn(`[启动清理] 已删除残留临时表: ${name}`);
                 }
             } catch (cleanupError) {
@@ -349,23 +359,26 @@ async function startServer() {
 
             // 通用: 检查表是否存在且缺少某列,缺少则 ALTER TABLE ADD COLUMN
             async function ensureColumn(tableName, columnName, columnDef) {
+                const quoteIdentifier = value => sequelize.getQueryInterface().queryGenerator.quoteIdentifier(value);
+                const quotedTable = quoteIdentifier(tableName);
+                const quotedColumn = quoteIdentifier(columnName);
                 // 全新安装时表尚未由 sync 创建；此时跳过补列，让后续 sync 按完整模型建表。
                 // 旧库中已存在的表才执行 ALTER，兼容 SQLite 与 MySQL。
                 if (!existingTableNames.has(String(tableName).toLowerCase())) return false;
                 if (dialect === 'sqlite') {
-                    const cols = await sequelize.query(`PRAGMA table_info(${tableName})`, { type: sequelize.QueryTypes.SELECT });
+                    const cols = await sequelize.query(`PRAGMA table_info(${quotedTable})`, { type: sequelize.QueryTypes.SELECT });
                     if (!cols.some(c => c.name === columnName)) {
                         console.log(`[迁移] 给 ${tableName} 表添加 ${columnName} 列...`);
                         // 修复: SQL 必须包含列名,否则 ALTER TABLE 报语法错误/列名丢失
-                        await sequelize.query(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${columnDef.sqlite}`);
+                        await sequelize.query(`ALTER TABLE ${quotedTable} ADD COLUMN ${quotedColumn} ${columnDef.sqlite}`);
                         return true;
                     }
                 } else if (dialect === 'mysql') {
-                    const cols = await sequelize.query(`SHOW COLUMNS FROM ${tableName} LIKE '${columnName}'`, { type: sequelize.QueryTypes.SELECT });
+                    const cols = await sequelize.query(`SHOW COLUMNS FROM ${quotedTable} LIKE :columnName`, { replacements: { columnName }, type: sequelize.QueryTypes.SELECT });
                     if (cols.length === 0) {
                         console.log(`[迁移] 给 ${tableName} 表添加 ${columnName} 列...`);
                         // 修复: SQL 必须包含列名
-                        await sequelize.query(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${columnDef.mysql}`);
+                        await sequelize.query(`ALTER TABLE ${quotedTable} ADD COLUMN ${quotedColumn} ${columnDef.mysql}`);
                         return true
                     }
                 }
@@ -590,9 +603,12 @@ async function startServer() {
                 { model: Banner, field: 'image_url', label: 'banners.image_url' }
             ];
             for (const { model, field, label } of cleanFields) {
+                const queryGenerator = sequelize.getQueryInterface().queryGenerator;
+                const tableName = queryGenerator.quoteTable(model.getTableName());
+                const fieldName = queryGenerator.quoteIdentifier(field);
                 // SQL REPLACE 清理反引号,只更新含反引号的行
                 const result = await sequelize.query(
-                    `UPDATE ${model.getTableName()} SET ${field} = REPLACE(${field}, '\`', '') WHERE ${field} LIKE '%\`%'`,
+                    `UPDATE ${tableName} SET ${fieldName} = REPLACE(${fieldName}, '\`', '') WHERE ${fieldName} LIKE '%\`%'`,
                     { type: sequelize.QueryTypes.UPDATE }
                 );
                 // SQLite 返回 [undefined, affectedCount], MySQL 返回 [affectedCount]

@@ -247,11 +247,11 @@ async function main() {
         record(`protected route requires auth: ${path}`, protectedResponse.status === 401, `status=${protectedResponse.status}; body=${protectedResponse.text.slice(0, 100)}`);
     }
 
-    const invalidCodemaoImport = await request('invalid codemao work id', '/api/works/codemao/not-a-number%3Cscript%3E');
-    record('invalid Codemao work id is rejected before external import', invalidCodemaoImport.status === 400, `status=${invalidCodemaoImport.status}; body=${invalidCodemaoImport.text.slice(0, 120)}`);
+    const invalidCodemaoRead = await request('invalid codemao work id', '/api/works/codemao/not-a-number%3Cscript%3E');
+    record('invalid Codemao work id remains read-only and does not import', invalidCodemaoRead.status === 404, `status=${invalidCodemaoRead.status}; body=${invalidCodemaoRead.text.slice(0, 120)}`);
 
-    const unauthCodemaoImport = await request('unauth codemao import', '/api/works/codemao/1');
-    record('anonymous Codemao import does not crash or bypass auth for uncached works', unauthCodemaoImport.status === 401 || unauthCodemaoImport.status === 200, `status=${unauthCodemaoImport.status}; body=${unauthCodemaoImport.text.slice(0, 120)}`);
+    const unauthCodemaoImport = await request('unauth codemao import', '/api/works/import/1', { method: 'POST' });
+    record('anonymous Codemao import is blocked before external fetch', unauthCodemaoImport.status === 401, `status=${unauthCodemaoImport.status}; body=${unauthCodemaoImport.text.slice(0, 120)}`);
 
     const traversal = await request('uploads traversal', '/uploads/avatars/%2e%2e/%2e%2e/server/app.js');
     record('uploads traversal does not leak source', !/require\('dotenv'\)|const app = express|JWT_SECRET/.test(traversal.text), traversal.text.slice(0, 120));

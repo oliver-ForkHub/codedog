@@ -176,6 +176,9 @@ const adminWorksEnd = adminController.indexOf('async function updateWork(req, re
 const adminWorksSection = adminController.slice(adminWorksStart, adminWorksEnd);
 check(adminWorksStart >= 0 && adminWorksEnd > adminWorksStart, 'admin work list controller section should be discoverable.');
 check(!adminWorksSection.includes('ForumBoard'), 'admin Work queries must not include ForumBoard, which is only associated with Post.');
+check(adminController.includes('publisher_id') && adminController.includes('affectedPublisherIds'), 'admin work editing should validate publisher changes and recalculate affected user work counts.');
+const adminView = read('client/src/views/Admin.vue');
+check(adminView.includes('workEditForm.publisher_id') && adminView.includes('searchWorkPublishers'), 'admin work editor should expose searchable publisher selection.');
 
 const geetestService = read('server/services/geetestService.js');
 check(geetestService.includes('misconfigured') && geetestService.includes('success: false'), 'enabled Geetest with incomplete config should fail closed.');

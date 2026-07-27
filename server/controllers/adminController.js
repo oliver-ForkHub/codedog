@@ -1140,7 +1140,7 @@ async function getWorks(req, res) {
 async function updateWork(req, res) {
     try {
         const { workId } = req.params;
-        const { name, preview, type, ide_type, view_times, praise_times, collection_times, status, is_featured, is_sidebar_recommended, sidebar_sort_order, _reason } = req.body;
+        const { name, publisher_id, preview, type, ide_type, view_times, praise_times, collection_times, status, is_featured, is_sidebar_recommended, sidebar_sort_order, _reason } = req.body;
 
         const work = await DbAdapter.findByPk(Work, workId);
         if (!work) {
@@ -1149,6 +1149,17 @@ async function updateWork(req, res) {
 
         const VALID_WORK_STATUSES = ['pending', 'published', 'rejected', 'hidden', 'deleted'];
         const updateData = {};
+        if (publisher_id !== undefined) {
+            const publisherId = Number(publisher_id);
+            if (!Number.isSafeInteger(publisherId) || publisherId <= 0) {
+                return errorResponse(res, '发布者编号格式不正确', 400);
+            }
+            const newPublisher = await DbAdapter.findByPk(User, publisherId);
+            if (!newPublisher || newPublisher.status !== 'active') {
+                return errorResponse(res, '目标发布者不存在或账号已被禁用', 400);
+            }
+            updateData.user_id = publisherId;
+        }
         if (name !== undefined) {
             const trimmedName = String(name).trim();
             if (!trimmedName) return errorResponse(res, '作品名称不能为空', 400);
@@ -1191,12 +1202,29 @@ async function updateWork(req, res) {
         if (is_sidebar_recommended !== undefined) updateData.is_sidebar_recommended = Boolean(is_sidebar_recommended);
         if (sidebar_sort_order !== undefined) updateData.sidebar_sort_order = Math.max(-9999, Math.min(9999, parseInt(sidebar_sort_order, 10) || 0));
 
-        await DbAdapter.update(Work, updateData, { where: { id: workId } });
+        const oldPublisherId = Number(work.user_id);
+        const newPublisherId = Number(updateData.user_id || work.user_id);
+        const effectiveStatus = updateData.status || work.status;
+        await sequelize.transaction(async (transaction) => {
+            await DbAdapter.update(Work, updateData, { where: { id: workId }, transaction });
+            const affectedPublisherIds = [...new Set([oldPublisherId, newPublisherId])]
+                .filter(publisherId => Number.isSafeInteger(publisherId) && publisherId > 0);
+            if (updateData.user_id !== undefined || effectiveStatus !== work.status) {
+                for (const publisherId of affectedPublisherIds) {
+                    const workCount = await DbAdapter.count(Work, {
+                        where: { user_id: publisherId, status: 'published' },
+                        transaction
+                    });
+                    await DbAdapter.update(User, { work_count: workCount }, { where: { id: publisherId }, transaction });
+                }
+            }
+        });
         logOperation(req, 'update_work', 'work', workId, {
             reason: _reason || '未说明',
             changes: updateData,
             old_values: {
                 name: work.name,
+                user_id: work.user_id,
                 preview: work.preview,
                 type: work.type,
                 ide_type: work.ide_type,

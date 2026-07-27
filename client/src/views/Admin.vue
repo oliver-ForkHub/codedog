@@ -563,7 +563,7 @@
                   <img :src="row.preview" class="r-admin--work_cover" referrerpolicy="no-referrer" />
                   <div>
                     <div class="r-admin--work_name">{{ row.name }}</div>
-                    <div class="r-admin--work_author">{{ row.codemao_author_name }}</div>
+                    <div class="r-admin--work_author">{{ row.author?.nickname || row.author?.username || row.codemao_author_name }}</div>
                   </div>
                 </div>
               </template>
@@ -627,7 +627,7 @@
                 <img :src="workDetail.preview" style="width: 200px; height: 150px; flex-shrink: 0; object-fit: cover; border-radius: 8px; background: #f0f0f0;" referrerpolicy="no-referrer" />
                 <div style="flex: 1;">
                   <h3 style="margin: 0 0 8px;">{{ workDetail.name }}</h3>
-                  <p style="color: #666; margin: 0 0 8px;">作者: {{ workDetail.codemao_author_name }}</p>
+                  <p style="color: #666; margin: 0 0 8px;">发布者: {{ workDetail.author?.nickname || workDetail.author?.username || '-' }}</p>
                   <div style="display: flex; gap: 8px; flex-wrap: wrap;">
                     <el-tag>{{ getTypeName(workDetail.type) }}</el-tag>
                     <el-tag :type="workDetail.is_featured ? 'warning' : 'info'">{{ workDetail.is_featured ? '已精选' : '未精选' }}</el-tag>
@@ -688,6 +688,26 @@
                   </div>
                 </el-form-item>
                 <el-form-item label="作品名称"><el-input v-model="workEditForm.name" /></el-form-item>
+                <el-form-item label="发布者">
+                  <el-select
+                    v-model="workEditForm.publisher_id"
+                    filterable
+                    remote
+                    reserve-keyword
+                    :remote-method="searchWorkPublishers"
+                    :loading="workPublisherLoading"
+                    placeholder="搜索用户名、昵称或编程猫ID"
+                    style="width: 100%"
+                  >
+                    <el-option
+                      v-for="user in workPublisherOptions"
+                      :key="user.id"
+                      :label="`${user.nickname || user.username}（${user.username} · ID ${user.id}）`"
+                      :value="user.id"
+                    />
+                  </el-select>
+                  <div style="color: #999; font-size: 12px; margin-top: 4px;">修改后作品归属和作品数量统计会同步转移</div>
+                </el-form-item>
                 <el-row :gutter="16">
                   <el-col :span="12"><el-form-item label="具体类型">
                     <el-select v-model="workEditForm.type" filterable allow-create default-first-option style="width: 100%" placeholder="如 KITTEN3、KITTEN4、NEKO">
@@ -2740,7 +2760,9 @@ const workDetail = ref(null)
 const workDetailSaving = ref(false)
 const workEditing = ref(false)
 const workEditReason = ref('')
-const workEditForm = ref({ name: '', preview: '', type: '', ide_type: '', view_times: 0, praise_times: 0, collection_times: 0, status: 'published', is_featured: false, is_sidebar_recommended: false, sidebar_sort_order: 0 })
+const workEditForm = ref({ name: '', publisher_id: null, preview: '', type: '', ide_type: '', view_times: 0, praise_times: 0, collection_times: 0, status: 'published', is_featured: false, is_sidebar_recommended: false, sidebar_sort_order: 0 })
+const workPublisherOptions = ref([])
+const workPublisherLoading = ref(false)
 const userDetail = ref(null)
 const passwordDialogVisible = ref(false)
 const passwordLoading = ref(false)
@@ -4842,8 +4864,11 @@ const showWorkDetail = (work) => {
 }
 
 const enterWorkEdit = () => {
+  const currentPublisher = workDetail.value.author
+  workPublisherOptions.value = currentPublisher ? [currentPublisher] : []
   workEditForm.value = {
     name: workDetail.value.name,
+    publisher_id: workDetail.value.user_id || currentPublisher?.id || null,
     preview: workDetail.value.preview || '',
     type: workDetail.value.type || '',
     ide_type: workDetail.value.ide_type || '',
@@ -4856,6 +4881,21 @@ const enterWorkEdit = () => {
     sidebar_sort_order: workDetail.value.sidebar_sort_order || 0
   }
   workEditing.value = true
+  searchWorkPublishers('')
+}
+
+const searchWorkPublishers = async (keyword) => {
+  workPublisherLoading.value = true
+  try {
+    const res = await adminApi.getUsers({ page: 1, pageSize: 20, keyword: String(keyword || '').trim(), status: 'active' })
+    if (res.code === 200) {
+      const current = workDetail.value?.author
+      const list = res.data?.list || []
+      workPublisherOptions.value = current && !list.some(user => user.id === current.id) ? [current, ...list] : list
+    }
+  } finally {
+    workPublisherLoading.value = false
+  }
 }
 
 const saveWorkDetail = async () => {

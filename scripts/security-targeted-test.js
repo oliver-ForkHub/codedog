@@ -324,6 +324,33 @@ async function main() {
     });
     record('admin cannot reset superadmin password', resetSuperadminPassword.status === 403, `status=${resetSuperadminPassword.status}`);
 
+    const transferableWork = await Work.create({
+        codemao_work_id: `${Date.now()}${Math.floor(Math.random() * 1000)}`,
+        name: `${marker}_before_transfer`,
+        user_id: activeUser.id,
+        codemao_author_id: String(activeUser.id),
+        codemao_author_name: activeUser.username,
+        status: 'published'
+    });
+    created.workIds.push(transferableWork.id);
+    const transferWorkResponse = await http(`/api/admin/works/${transferableWork.id}`, {
+        method: 'PUT',
+        headers: auth(adminToken),
+        body: { name: `${marker}_after_transfer`, publisher_id: adminUser.id, _reason: 'security transfer test' }
+    });
+    await transferableWork.reload();
+    await activeUser.reload();
+    await adminUser.reload();
+    record(
+        'admin can change work name and publisher atomically',
+        transferWorkResponse.status === 200
+            && transferableWork.name === `${marker}_after_transfer`
+            && Number(transferableWork.user_id) === Number(adminUser.id)
+            && Number(activeUser.work_count) === 0
+            && Number(adminUser.work_count) === 1,
+        `status=${transferWorkResponse.status}; publisher=${transferableWork.user_id}; oldCount=${activeUser.work_count}; newCount=${adminUser.work_count}`
+    );
+
     const pendingWork = await Work.create({
         codemao_work_id: `${Date.now()}${Math.floor(Math.random() * 1000)}`,
         name: `${marker}_pending_work`,

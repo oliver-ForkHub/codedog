@@ -131,6 +131,10 @@ export const adminApi = {
   deleteWork(workId) {
     return request.delete(`/admin/works/${workId}`)
   },
+
+  purgeWork(workId, data) {
+    return request.delete(`/admin/works/${workId}/purge`, { data })
+  },
   
   recalibrateWorks() {
     return request.post('/admin/works/recalibrate')

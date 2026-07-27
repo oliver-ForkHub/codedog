@@ -2,7 +2,7 @@
  * 后台管理控制器
  */
 
-const { User, UserWarning, Work, Comment, Post, ForumBoard, ForumBoardModerator, PostSubscription, PostDraft, PostRevision, ForumModerationLog, Favorite, Follow, Banner, Report, ReportAuditLog, IpBan, Notification, Announcement, SystemConfig, OperationLog, SensitiveWord, RolePermission, CaptchaStats, Statistics, Studio, StudioMember, StudioWork, StudioPointLog, Like, sequelize } = require('../models');
+const { User, UserWarning, Work, Comment, Post, ForumBoard, ForumBoardModerator, PostSubscription, PostDraft, PostRevision, ForumModerationLog, Favorite, Follow, Banner, Report, ReportAuditLog, IpBan, Notification, Announcement, SystemConfig, OperationLog, SensitiveWord, RolePermission, CaptchaStats, Statistics, Studio, StudioMember, StudioWork, StudioPointLog, StudioTask, Like, sequelize } = require('../models');
 const { successResponse, errorResponse, paginateResponse } = require('../middleware/response');
 const { getAllRoles, canManageUser, getRole, hasPermission, getAllPermissions, refreshRoleCache, DEFAULT_ROLES } = require('../config/permissions');
 const { logOperation } = require('../middleware/operationLog');
@@ -1329,6 +1329,97 @@ async function deleteWork(req, res) {
     } catch (error) {
         console.error('删除作品错误:', error);
         return errorResponse(res, '删除失败', 500);
+    }
+}
+
+/**
+ * 彻底删除作品：物理清理关联数据，并在同一事务内保留独立审计快照。
+ */
+async function purgeWork(req, res) {
+    try {
+        const { workId } = req.params;
+        const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
+        const confirmation = String(req.body?.confirmCodemaoWorkId ?? '').trim();
+        if (reason.length < 5 || reason.length > 500) return errorResponse(res, '彻底删除原因需为 5-500 个字符', 400);
+
+        const work = await DbAdapter.findByPk(Work, workId);
+        if (!work) return errorResponse(res, '作品不存在', 404);
+        const codemaoWorkId = String(work.codemao_work_id ?? '');
+        if (!codemaoWorkId || confirmation !== codemaoWorkId) return errorResponse(res, '确认的编程猫作品 ID 不匹配', 400);
+
+        const wid = DbAdapter.getId(work);
+        const authorId = work.user_id;
+        let auditLogId = null;
+        await sequelize.transaction(async (t) => {
+            const [comments, studioWorks, workReports] = await Promise.all([
+                DbAdapter.findAll(Comment, { where: { work_id: wid }, attributes: ['id'], transaction: t }),
+                DbAdapter.findAll(StudioWork, { where: { work_id: wid }, attributes: ['id', 'studio_id', 'status'], transaction: t }),
+                DbAdapter.findAll(Report, { where: { target_id: wid, type: 'work' }, attributes: ['id'], transaction: t })
+            ]);
+            const commentIds = comments.map(item => item.id);
+            const commentReports = commentIds.length ? await DbAdapter.findAll(Report, {
+                where: { target_id: { [Op.in]: commentIds }, type: 'comment' }, attributes: ['id'], transaction: t
+            }) : [];
+            const reportIds = [...workReports, ...commentReports].map(item => item.id);
+            const affectedStudioIds = [...new Set(studioWorks.filter(item => item.status === 'approved').map(item => item.studio_id))];
+            const relationCounts = {
+                comments: commentIds.length,
+                work_likes: await DbAdapter.count(Like, { where: { work_id: wid }, transaction: t }),
+                comment_likes: commentIds.length ? await DbAdapter.count(Like, { where: { comment_id: { [Op.in]: commentIds } }, transaction: t }) : 0,
+                favorites: await DbAdapter.count(Favorite, { where: { work_id: wid }, transaction: t }),
+                studio_works: studioWorks.length,
+                studio_tasks_detached: await DbAdapter.count(StudioTask, { where: { work_id: wid }, transaction: t }),
+                reports: reportIds.length,
+                notifications: await DbAdapter.count(Notification, { where: { related_id: wid, related_type: 'work' }, transaction: t })
+                    + (commentIds.length ? await DbAdapter.count(Notification, { where: { related_id: { [Op.in]: commentIds }, related_type: 'comment' }, transaction: t }) : 0)
+            };
+
+            const audit = await DbAdapter.create(OperationLog, {
+                user_id: req.user?.id || null,
+                action: 'purge_work', target_type: 'work', target_id: wid,
+                details: JSON.stringify({
+                    schema_version: 1, irreversible: true, reason,
+                    work_snapshot: work.toJSON(), relation_counts: relationCounts,
+                    affected_studio_ids: affectedStudioIds,
+                    operator: { id: req.user?.id || null, role: req.user?.role || null },
+                    request_id: req.id || req.headers['x-request-id'] || null
+                }),
+                ip_address: req.ip || null,
+                user_agent: req.get('user-agent') || null
+            }, { transaction: t });
+            auditLogId = audit.id;
+
+            if (reportIds.length) {
+                await DbAdapter.destroy(ReportAuditLog, { where: { report_id: { [Op.in]: reportIds } }, transaction: t });
+                await DbAdapter.destroy(Report, { where: { id: { [Op.in]: reportIds } }, transaction: t });
+            }
+            await DbAdapter.destroy(Notification, { where: { related_id: wid, related_type: 'work' }, transaction: t });
+            if (commentIds.length) {
+                await DbAdapter.destroy(Notification, { where: { related_id: { [Op.in]: commentIds }, related_type: 'comment' }, transaction: t });
+                await DbAdapter.destroy(Like, { where: { comment_id: { [Op.in]: commentIds } }, transaction: t });
+                await DbAdapter.update(Comment, { parent_id: null }, { where: { id: { [Op.in]: commentIds } }, transaction: t });
+            }
+            await DbAdapter.destroy(Like, { where: { work_id: wid }, transaction: t });
+            await DbAdapter.destroy(Favorite, { where: { work_id: wid }, transaction: t });
+            await DbAdapter.update(StudioTask, { work_id: null }, { where: { work_id: wid }, transaction: t });
+            await DbAdapter.destroy(StudioWork, { where: { work_id: wid }, transaction: t });
+            await DbAdapter.destroy(Comment, { where: { work_id: wid }, transaction: t });
+            await DbAdapter.destroy(Work, { where: { id: wid }, transaction: t });
+
+            for (const sid of affectedStudioIds) {
+                const approvedCount = await DbAdapter.count(StudioWork, { where: { studio_id: sid, status: 'approved' }, transaction: t });
+                const totalScore = await DbAdapter.sum(StudioWork, 'score', { where: { studio_id: sid, status: 'approved' }, transaction: t }) || 0;
+                await DbAdapter.update(Studio, { work_count: approvedCount, total_score: totalScore }, { where: { id: sid }, transaction: t });
+            }
+            if (authorId != null) {
+                const authorWorkCount = await DbAdapter.count(Work, { where: { user_id: authorId, status: 'published' }, transaction: t });
+                await DbAdapter.update(User, { work_count: authorWorkCount }, { where: { id: authorId }, transaction: t });
+            }
+        });
+        return successResponse(res, { auditLogId }, '作品已彻底删除，现在可以重新爬取');
+    } catch (error) {
+        console.error('彻底删除作品错误:', error);
+        return errorResponse(res, '彻底删除失败，数据未变更', 500);
     }
 }
 
@@ -5161,6 +5252,7 @@ module.exports = {
     getWorks,
     setWorkFeatured,
     deleteWork,
+    purgeWork,
     crawlWork,
     crawlHotWorks,
     crawlUserWorks,

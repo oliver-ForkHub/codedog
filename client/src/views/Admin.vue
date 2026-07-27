@@ -665,6 +665,9 @@
                       <el-dropdown-item command="delete" divided>
                         <span style="color: #f56c6c;"><el-icon><Delete /></el-icon>删除作品</span>
                       </el-dropdown-item>
+                      <el-dropdown-item v-if="userStore.user?.role === 'superadmin'" command="purge" divided>
+                        <span style="color: #c45656;"><el-icon><Delete /></el-icon>彻底删除（数据库）</span>
+                      </el-dropdown-item>
                     </el-dropdown-menu>
                   </template>
                 </el-dropdown>
@@ -5144,6 +5147,32 @@ const handleDeleteWork = async (work) => {
   } catch (e) {}
 }
 
+const handlePurgeWork = async (work) => {
+  try {
+    const reasonResult = await ElMessageBox.prompt(
+      '此操作会永久删除数据库中的作品及关联数据，并保留独立审计记录。请输入删除原因（至少 5 个字符）。',
+      '彻底删除作品',
+      { type: 'error', confirmButtonText: '下一步', inputPlaceholder: '例如：错误爬取，需要重新导入', inputValidator: value => (value || '').trim().length >= 5 || '请输入至少 5 个字符的原因' }
+    )
+    const idResult = await ElMessageBox.prompt(
+      `最后确认：请输入编程猫作品 ID ${work.codemao_work_id}。删除后不可恢复，但可重新爬取。`,
+      '不可逆操作确认',
+      { type: 'error', confirmButtonText: '彻底删除', inputPlaceholder: String(work.codemao_work_id), inputValidator: value => String(value || '').trim() === String(work.codemao_work_id) || '作品 ID 不匹配' }
+    )
+    const res = await adminApi.purgeWork(work.id, {
+      reason: reasonResult.value.trim(),
+      confirmCodemaoWorkId: idResult.value.trim()
+    })
+    if (res.code === 200) {
+      workDetailVisible.value = false
+      await fetchWorks()
+      ElMessage.success('已彻底删除，现在可以重新爬取')
+    }
+  } catch (e) {
+    if (e !== 'cancel' && e !== 'close') ElMessage.error(e?.response?.data?.msg || '彻底删除失败')
+  }
+}
+
 // 更多操作:隐藏/取消隐藏/删除
 const handleWorkMoreAction = async (cmd, work) => {
   if (cmd === 'hide') {
@@ -5168,6 +5197,8 @@ const handleWorkMoreAction = async (cmd, work) => {
     } catch (e) {}
   } else if (cmd === 'delete') {
     handleDeleteWork(work)
+  } else if (cmd === 'purge') {
+    handlePurgeWork(work)
   }
 }
 

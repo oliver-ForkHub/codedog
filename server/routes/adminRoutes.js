@@ -66,6 +66,7 @@ router.get('/works', denyModerator, requirePermission('work:review'), adminContr
 router.put('/works/:workId', denyModerator, requirePermission('work:edit'), adminController.updateWork);
 router.put('/works/:workId/featured', denyModerator, requirePermission('work:feature'), adminController.setWorkFeatured);
 router.delete('/works/:workId', denyModerator, requirePermission('work:delete'), adminController.deleteWork);
+router.delete('/works/:workId/purge', requireRole('superadmin'), adminController.purgeWork);
 // 全站校准属于高风险操作：仅超级管理员可先扫描预览，再显式确认应用。
 router.post('/works/recalibrate', requireRole('superadmin'), adminController.recalibrateAllWorks);
 router.get('/works/recalibrate/:jobId', requireRole('superadmin'), adminController.getRecalibrationJob);

@@ -163,6 +163,8 @@ async function avatarImageHostUpload(req, res, next) {
 }
 
 router.post('/login', loginRateLimit, geetestVerify('login'), userController.login);
+// 原生客户端使用 Bearer token，不依赖 WebView cookie。该入口与网页登录执行相同的限流、验证码和账号校验。
+router.post('/mobile/login', loginRateLimit, geetestVerify('login'), userController.login);
 router.post('/logout', authMiddleware, userController.logout);
 router.get('/me', authMiddleware, userController.getCurrentUser);
 router.get('/me/pending-warning', authMiddleware, warningController.getPendingWarning);

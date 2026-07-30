@@ -8,6 +8,15 @@
         <a href="/" class="c-navigator--logo_wrap">
           <span class="c-navigator--logo_text">编程狗社区</span>
         </a>
+
+        <router-link
+          to="/work_shop"
+          class="c-navigator--mobile_studio"
+          :class="{ 'is-active': $route.path.startsWith('/work_shop') || $route.path.startsWith('/studio/') }"
+        >
+          <el-icon><OfficeBuilding /></el-icon>
+          <span>工作室</span>
+        </router-link>
         
         <!-- 导航菜单 -->
         <ul class="c-navigator--nav_wrap">
@@ -214,7 +223,7 @@ import MobileBottomNav from '@/components/MobileBottomNav.vue'
 import { hcaptchaApi } from '@/api/hcaptcha'
 import { publicApi } from '@/api/public'
 import { userApi } from '@/api/user'
-import { Search, EditPen, Bell, CaretBottom, User, Monitor, Star, Setting, SwitchButton, ChatDotRound } from '@element-plus/icons-vue'
+import { Search, EditPen, Bell, CaretBottom, User, Monitor, Star, Setting, SwitchButton, ChatDotRound, OfficeBuilding } from '@element-plus/icons-vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -973,6 +982,10 @@ $shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
   display: none;
 }
 
+.c-navigator--mobile_studio {
+  display: none;
+}
+
 @media (max-width: 768px) {
   .c-navigator--header-content {
     gap: 12px;
@@ -985,6 +998,27 @@ $shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
   
   .c-navigator--search_wrap {
     display: none;
+  }
+
+  .c-navigator--mobile_studio {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-height: 36px;
+    padding: 0 10px;
+    border: 1px solid rgba(23, 32, 51, .1);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, .72);
+    color: #4f5662;
+    font-size: 13px;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+
+  .c-navigator--mobile_studio.is-active {
+    border-color: rgba(229, 169, 0, .38);
+    background: #fff5d6;
+    color: #9a7000;
   }
 
   .c-navigator--platform_links {

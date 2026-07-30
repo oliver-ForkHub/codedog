@@ -24,6 +24,9 @@ function geetestVerify(scene) {
             );
 
             if (result.success) {
+                // 标记当前请求已通过的场景，避免下游重复消费同一验证码结果。
+                req.geetestVerifiedScenes = req.geetestVerifiedScenes || new Set();
+                req.geetestVerifiedScenes.add(resolvedScene);
                 return next();
             } else {
                 cleanupRejectedUpload(req);

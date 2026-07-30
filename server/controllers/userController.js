@@ -304,8 +304,9 @@ async function codemaoLogin(req, res, identity, password) {
             message = '编程猫登录成功，您已被设为初始管理员';
         }
         
-        // 修复: httpOnly cookie 模式下不再返回 token,前端通过 /users/me 验证登录态
-        return successResponse(res, {
+        // 网页端继续只使用 httpOnly cookie；独立的原生登录路由返回 Bearer token，
+        // 由 Android/iOS 系统安全存储保管，避免依赖 WebView cookie jar。
+        const responseData = {
             user: {
                 id: DbAdapter.getId(user),
                 codemao_user_id: user.codemao_user_id,
@@ -317,7 +318,12 @@ async function codemaoLogin(req, res, identity, password) {
                 role: user.role
             },
             syncingWorks: true  // 提示前端作品正在同步中
-        }, message);
+        };
+        if (req.path === '/mobile/login') {
+            responseData.access_token = token;
+            responseData.token_type = 'Bearer';
+        }
+        return successResponse(res, responseData, message);
     } catch (error) {
         console.error('编程猫登录错误:', error);
         return errorResponse(res, '编程猫登录失败', 500);
@@ -520,13 +526,15 @@ async function updateProfile(req, res) {
     try {
         let { nickname, bio, doing, profile_cover, show_favorites, geetest_challenge, geetest_validate, geetest_seccode } = req.body;
         
-        const result = await GeetestService.verify(
-            'update_profile', 
-            geetest_challenge, 
-            geetest_validate, 
-            geetest_seccode, 
-            req
-        );
+        const result = req.geetestVerifiedScenes?.has('update_profile')
+            ? { success: true }
+            : await GeetestService.verify(
+                'update_profile',
+                geetest_challenge,
+                geetest_validate,
+                geetest_seccode,
+                req
+            );
         
         if (!result.success) {
             cleanupUploadedFile(req.file);

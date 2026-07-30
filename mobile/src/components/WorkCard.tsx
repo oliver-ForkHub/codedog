@@ -22,12 +22,14 @@ export function WorkCard({ work, compact, onPress, onLongPress }: Props) {
       </View>
       <View style={styles.body}>
         <Text numberOfLines={1} style={styles.title}>{work.name}</Text>
-        <Text numberOfLines={1} style={styles.author}>{authorName}</Text>
-        <View style={styles.meta}>
-          <Ionicons name="eye-outline" size={13} color={colors.subtle} />
-          <Text style={styles.metaText}>{work.view_times || 0}</Text>
-          <Ionicons name="heart-outline" size={13} color={colors.subtle} />
-          <Text style={styles.metaText}>{work.praise_times || 0}</Text>
+        <View style={styles.footer}>
+          <Text numberOfLines={1} style={styles.author}>{authorName}</Text>
+          <View style={styles.meta}>
+            <Ionicons name="eye-outline" size={12} color={colors.subtle} />
+            <Text style={styles.metaText}>{work.view_times || 0}</Text>
+            <Ionicons name="heart-outline" size={12} color={colors.subtle} />
+            <Text style={styles.metaText}>{work.praise_times || 0}</Text>
+          </View>
         </View>
       </View>
     </Pressable>
@@ -37,15 +39,16 @@ export function WorkCard({ work, compact, onPress, onLongPress }: Props) {
 const styles = StyleSheet.create({
   card: { width: 202, overflow: 'hidden', borderRadius: 18, backgroundColor: colors.surface, ...shadow },
   compact: { width: '48.4%', marginBottom: 14 },
-  cover: { width: '100%', aspectRatio: 16 / 9, backgroundColor: '#EEF1F5' },
+  cover: { width: '100%', aspectRatio: 4 / 3, backgroundColor: '#EEF1F5' },
   compactCover: { height: undefined },
   image: { width: '100%', height: '100%' },
   placeholder: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   tag: { position: 'absolute', top: 10, left: 10, overflow: 'hidden', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, backgroundColor: 'rgba(23,32,51,.82)', color: '#FFF', fontSize: 10, fontWeight: '700' },
-  body: { paddingHorizontal: 11, paddingTop: 9, paddingBottom: 8 },
+  body: { paddingHorizontal: 11, paddingTop: 8, paddingBottom: 7 },
   title: { color: colors.ink, fontSize: 15, fontWeight: '800' },
-  author: { marginTop: 2, color: colors.muted, fontSize: 12 },
-  meta: { marginTop: 6, flexDirection: 'row', alignItems: 'center', gap: 4 },
-  metaText: { marginRight: 7, color: colors.subtle, fontSize: 11 },
+  footer: { minWidth: 0, marginTop: 4, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6 },
+  author: { flex: 1, minWidth: 0, color: colors.muted, fontSize: 11 },
+  meta: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  metaText: { marginRight: 3, color: colors.subtle, fontSize: 10 },
   pressed: { opacity: 0.76, transform: [{ scale: 0.985 }] },
 });

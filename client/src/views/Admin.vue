@@ -288,16 +288,8 @@
                     <el-button v-if="tokenRevealed" size="small" type="danger" plain @click="tokenRevealed = false">隐藏</el-button>
                   </div>
                 </div>
-            </div>
-            <el-descriptions :column="2" border style="margin: 16px 0;">
-              <el-descriptions-item label="是否登录过 App">
-                <el-tag :type="userDetail.user.app_last_login_at ? 'success' : 'info'">{{ userDetail.user.app_last_login_at ? '是' : '否' }}</el-tag>
-              </el-descriptions-item>
-              <el-descriptions-item label="最后 App 登录">{{ userDetail.user.app_last_login_at ? formatDate(userDetail.user.app_last_login_at) : '从未登录' }}</el-descriptions-item>
-              <el-descriptions-item label="App 平台">{{ userDetail.user.app_last_platform || '-' }}</el-descriptions-item>
-              <el-descriptions-item label="App 版本">{{ userDetail.user.app_last_version ? `${userDetail.user.app_last_version}（构建 ${userDetail.user.app_last_build || '-'}）` : '-' }}</el-descriptions-item>
-            </el-descriptions>
-            <div class="r-admin--user_detail_actions" style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px;">
+              </div>
+              <div class="r-admin--user_detail_actions">
                 <el-button type="primary" size="small" @click="showRoleDialog(userDetail.user)">修改角色</el-button>
                 <el-button size="small" @click="showPasswordDialog">修改密码</el-button>
                 <el-button type="warning" size="small" @click="showSendNotificationDialog">发送站内信</el-button>
@@ -308,6 +300,17 @@
                 <el-button v-if="userDetail.user.id !== userStore.user?.id" size="small" type="primary" plain @click="impersonateUserDetail">一键登录</el-button>
               </div>
             </div>
+            <section class="r-admin--app_login_panel">
+              <div class="r-admin--app_login_title">App 登录信息</div>
+              <el-descriptions :column="2" border>
+              <el-descriptions-item label="是否登录过 App">
+                <el-tag :type="userDetail.user.app_last_login_at ? 'success' : 'info'">{{ userDetail.user.app_last_login_at ? '是' : '否' }}</el-tag>
+              </el-descriptions-item>
+              <el-descriptions-item label="最后 App 登录">{{ userDetail.user.app_last_login_at ? formatDate(userDetail.user.app_last_login_at) : '从未登录' }}</el-descriptions-item>
+              <el-descriptions-item label="App 平台">{{ userDetail.user.app_last_platform || '-' }}</el-descriptions-item>
+              <el-descriptions-item label="App 版本">{{ userDetail.user.app_last_version ? `${userDetail.user.app_last_version}（构建 ${userDetail.user.app_last_build || '-'}）` : '-' }}</el-descriptions-item>
+              </el-descriptions>
+            </section>
             
             <div class="r-admin--user_stats">
               <div class="r-admin--user_stat">
@@ -6530,6 +6533,7 @@ $sidebar-width: 200px;
   
   .r-admin--user_detail_info {
     flex: 1;
+    min-width: 0;
     
     h3 {
       margin: 0 0 8px;
@@ -6549,8 +6553,14 @@ $sidebar-width: 200px;
   
   .r-admin--user_detail_actions {
     display: flex;
-    gap: 12px;
+    flex: 0 0 176px;
+    align-content: flex-start;
+    gap: 8px;
     flex-wrap: wrap;
+
+    .el-button + .el-button {
+      margin-left: 0;
+    }
   }
 
   // 编程猫 Token 展示区域(superadmin only)
@@ -6585,6 +6595,26 @@ $sidebar-width: 200px;
       word-break: break-all;
       max-width: 320px;
       display: inline-block;
+    }
+  }
+
+  .r-admin--app_login_panel {
+    margin-bottom: 24px;
+    padding: 16px;
+    background: #f8f9fb;
+    border: 1px solid #e6eaf0;
+    border-radius: 8px;
+
+    .r-admin--app_login_title {
+      margin-bottom: 12px;
+      color: #303133;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    :deep(.el-descriptions__label) {
+      width: 132px;
+      white-space: nowrap;
     }
   }
 }

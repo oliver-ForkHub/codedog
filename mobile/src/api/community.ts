@@ -6,6 +6,7 @@ export const communityApi = {
     return apiGet<CommunityPage<Post>>('/posts', params);
   },
   post(id: number) { return apiGet<Post>(`/posts/${id}`); },
+  postsByCodemaoUser(codemaoId: string) { return apiGet<CommunityPage<Post>>(`/posts/forum/codemao-users/${encodeURIComponent(codemaoId)}/posts`, { page: 1, pageSize: 30 }); },
   boards() { return apiGet<ForumBoard[]>('/posts/boards/list'); },
   createPost(data: { title: string; content: string; board_id: number; studio_id?: number; post_type: string; tags: string[]; cover?: string }) { return apiPost<Post>('/posts', data); },
   uploadImage(uri: string, fileName = 'cover.jpg', mimeType = 'image/jpeg') {

@@ -22,6 +22,7 @@ router.get('/subscriptions/mine', authMiddleware, postController.getMyForumSubsc
 router.get('/forum/leaderboard', postController.getLeaderboard);
 router.get('/forum/users/:userId/reputation', postController.getUserReputation);
 router.get('/forum/users/:userId/posts', postController.getUserForumPosts);
+router.get('/forum/codemao-users/:codemaoId/posts', postController.getCodemaoUserForumPosts);
 router.put('/drafts/current', authMiddleware, postController.saveDraft);
 router.delete('/drafts/current', authMiddleware, postController.deleteDraft);
 router.get('/:id', optionalAuth, postController.getPostDetail);

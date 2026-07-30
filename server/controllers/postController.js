@@ -80,6 +80,27 @@ async function getUserForumPosts(req, res) {
     }
 }
 
+async function getCodemaoUserForumPosts(req, res) {
+    try {
+        const codemaoId = String(req.params.codemaoId || '').trim();
+        if (!/^\d+$/.test(codemaoId)) return errorResponse(res, '无效的编程猫用户 ID', 400);
+        const user = await User.findOne({ where: { codemao_user_id: codemaoId, status: 'active' }, attributes: ['id'] });
+        if (!user) return errorResponse(res, '用户不存在', 404);
+        const { page, pageSize, offset } = DbAdapter.parsePagination(req.query);
+        const { count, rows } = await Post.findAndCountAll({
+            where: { user_id: DbAdapter.getId(user), status: 'published' },
+            include: [{ model: ForumBoard, as: 'board', required: false, attributes: ['id', 'slug', 'name', 'icon', 'color'] }],
+            order: [['is_top', 'DESC'], ['last_reply_at', 'DESC'], ['created_at', 'DESC']],
+            limit: pageSize,
+            offset
+        });
+        return paginateResponse(res, rows.map(normalizePostOutput), count, page, pageSize);
+    } catch (error) {
+        console.error('按编程猫用户 ID 获取论坛主题失败:', error);
+        return errorResponse(res, '获取用户论坛主题失败', 500);
+    }
+}
+
 const POST_TYPES = new Set(['discussion', 'question', 'tutorial']);
 
 async function resolveBoard(boardId, legacyCategory, role = 'user') {
@@ -1107,6 +1128,7 @@ module.exports = {
     getLeaderboard,
     getUserReputation,
     getUserForumPosts,
+    getCodemaoUserForumPosts,
     getBoards,
     toggleBoardSubscription,
     togglePostSubscription,

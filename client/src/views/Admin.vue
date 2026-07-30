@@ -1796,6 +1796,17 @@
           </div>
 
           <div class="r-admin--configs_body">
+            <div class="r-admin--config_section" id="config-mobile-version">
+              <div class="r-admin--config_section_title"><span class="r-admin--config_section_icon">📱</span><span>App 版本管理</span></div>
+              <el-form :model="configForm" label-width="110px" class="r-admin--config_form">
+                <el-row :gutter="20">
+                  <el-col :span="8"><el-form-item label="最低允许版本"><el-input v-model="configForm.mobile_android_min_version" placeholder="1.1.0" /><div style="font-size:12px;color:#909399;margin-top:4px">低于此版本将被强制拦截</div></el-form-item></el-col>
+                  <el-col :span="8"><el-form-item label="线上最新版本"><el-input v-model="configForm.mobile_android_latest_version" placeholder="1.1.0" /></el-form-item></el-col>
+                  <el-col :span="8"><el-form-item label="APK 下载地址"><el-input v-model="configForm.mobile_android_update_url" placeholder="https://.../codedog-mobile.apk" /></el-form-item></el-col>
+                </el-row>
+                <el-form-item label="强制更新文案"><el-input v-model="configForm.mobile_android_update_message" maxlength="200" show-word-limit placeholder="当前版本已停止服务，请更新后继续使用。" /></el-form-item>
+              </el-form>
+            </div>
             <!-- AI 审核 -->
             <div class="r-admin--config_section" id="config-ai">
               <div class="r-admin--config_section_title">
@@ -3423,7 +3434,11 @@ const configForm = ref({
   mysql_database: '',
   mysql_username: '',
   mysql_password: '',
-  sensitive_check_mode: 'builtin'
+  sensitive_check_mode: 'builtin',
+  mobile_android_min_version: '1.1.0',
+  mobile_android_latest_version: '1.1.0',
+  mobile_android_update_url: 'https://github.com/txcxgzs/codedog/releases/download/mobile-latest/codedog-mobile.apk',
+  mobile_android_update_message: '当前版本已停止服务，请更新后继续使用。'
 })
 const loadingConfigs = ref(false)
 const hcaptchaExpireMinutes = ref(20)
@@ -3630,6 +3645,10 @@ const fetchConfigs = async () => {
       form.mysql_username = data.mysql_username || ''
       form.mysql_password = data.mysql_password || ''
       form.sensitive_check_mode = data.sensitive_check_mode || 'builtin'
+      form.mobile_android_min_version = data.mobile_android_min_version || '1.1.0'
+      form.mobile_android_latest_version = data.mobile_android_latest_version || '1.1.0'
+      form.mobile_android_update_url = data.mobile_android_update_url || 'https://github.com/txcxgzs/codedog/releases/download/mobile-latest/codedog-mobile.apk'
+      form.mobile_android_update_message = data.mobile_android_update_message || '当前版本已停止服务，请更新后继续使用。'
       if (data.hcaptcha_expire_minutes) {
         hcaptchaExpireMinutes.value = parseInt(data.hcaptcha_expire_minutes) || 20
       }

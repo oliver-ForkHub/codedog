@@ -3563,12 +3563,15 @@ async function updateSystemConfig(req, res) {
             'sensitive_api_enabled', 'sensitive_api_url', 'sensitive_api_key',
             'db_type', 'db_path', 'db_host', 'db_port', 'db_name', 'db_user', 'db_password',
             'mysql_host', 'mysql_port', 'mysql_database', 'mysql_username', 'mysql_password',
-            'proxy_enabled', 'proxy_pool_url', 'proxy_current', 'proxy_protocol', 'proxy_auto_refresh'
+            'proxy_enabled', 'proxy_pool_url', 'proxy_current', 'proxy_protocol', 'proxy_auto_refresh',
+            'mobile_android_min_version', 'mobile_android_latest_version', 'mobile_android_update_url', 'mobile_android_update_message'
         ];
         if (!ALLOWED_CONFIG_KEYS.includes(key)) {
             return errorResponse(res, `不支持的配置项: ${key}`, 400);
         }
 
+        if (['mobile_android_min_version', 'mobile_android_latest_version'].includes(key) && !/^\d+\.\d+\.\d+$/.test(String(value))) return errorResponse(res, '版本号必须是 x.y.z 格式', 400);
+        if (key === 'mobile_android_update_url' && !/^https:\/\//i.test(String(value))) return errorResponse(res, 'App 更新地址必须使用 HTTPS', 400);
         let config = await DbAdapter.findOne(SystemConfig, { where: { config_key: key } });
         if (config) {
             await DbAdapter.update(SystemConfig, { config_value: value }, { where: { config_key: key } });
@@ -3580,6 +3583,7 @@ async function updateSystemConfig(req, res) {
         if (key === 'hcaptcha_enabled') {
             try { require('../middleware/hcaptcha').invalidateHcaptchaCache(); } catch (e) {}
         }
+        if (key.startsWith('mobile_android_')) require('../middleware/mobileVersion').invalidateMobileVersionCache();
 
         // 修复 P2-10: 数据库相关配置同时写 .env,与批量更新保持一致
         const dbEnvKeyMap = {
@@ -3637,7 +3641,8 @@ async function batchUpdateConfigs(req, res) {
             'sensitive_api_enabled', 'sensitive_api_url', 'sensitive_api_key',
             'db_type', 'db_path', 'db_host', 'db_port', 'db_name', 'db_user', 'db_password',
             'mysql_host', 'mysql_port', 'mysql_database', 'mysql_username', 'mysql_password',
-            'proxy_enabled', 'proxy_pool_url', 'proxy_current', 'proxy_protocol', 'proxy_auto_refresh'
+            'proxy_enabled', 'proxy_pool_url', 'proxy_current', 'proxy_protocol', 'proxy_auto_refresh',
+            'mobile_android_min_version', 'mobile_android_latest_version', 'mobile_android_update_url', 'mobile_android_update_message'
         ];
         const maskedValues = ['******', '***'];
         const sensitiveKeys = ['ai_api_key', 'hcaptcha_secret_key', 'geetest_key', 'sensitive_api_key', 'mysql_password', 'db_password'];
@@ -3646,6 +3651,14 @@ async function batchUpdateConfigs(req, res) {
             if (!ALLOWED_CONFIG_KEYS.includes(key)) continue;
             if (sensitiveKeys.includes(key) && maskedValues.includes(String(value))) continue;
             filteredConfigs[key] = value;
+        }
+        for (const key of ['mobile_android_min_version', 'mobile_android_latest_version']) {
+            if (filteredConfigs[key] !== undefined && !/^\d+\.\d+\.\d+$/.test(String(filteredConfigs[key]))) return errorResponse(res, `${key} 必须是 x.y.z 格式`, 400);
+        }
+        if (filteredConfigs.mobile_android_update_url !== undefined && !/^https:\/\//i.test(String(filteredConfigs.mobile_android_update_url))) return errorResponse(res, 'App 更新地址必须使用 HTTPS', 400);
+        if (filteredConfigs.mobile_android_min_version !== undefined && filteredConfigs.mobile_android_latest_version !== undefined) {
+            const { compareVersions } = require('../middleware/mobileVersion');
+            if (compareVersions(filteredConfigs.mobile_android_latest_version, filteredConfigs.mobile_android_min_version) < 0) return errorResponse(res, '线上最新版本不能低于最低允许版本', 400);
         }
 
         const hasDbConfig = Object.keys(filteredConfigs).some(key =>
@@ -3700,6 +3713,7 @@ async function batchUpdateConfigs(req, res) {
         }
 
         logOperation(req, 'batch_update_config', 'system_config', null, redactConfigDetails(filteredConfigs));
+        if (Object.keys(filteredConfigs).some(key => key.startsWith('mobile_android_'))) require('../middleware/mobileVersion').invalidateMobileVersionCache();
         return successResponse(res, null, '更新成功');
     } catch (error) {
         console.error('批量更新系统设置错误:', error);

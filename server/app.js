@@ -244,7 +244,10 @@ app.use(session(sessionOptions));
 // IP 封禁中间件: 置于限流之前,被封禁 IP 直接 403,不占用限流配额
 app.use(ipBanMiddleware);
 
-app.get('/api/mobile/version', (req, res) => res.json({ code: 200, msg: 'ok', data: getMobileVersionPolicy() }));
+app.get('/api/mobile/version', async (req, res, next) => {
+    try { res.json({ code: 200, msg: 'ok', data: await getMobileVersionPolicy() }); }
+    catch (error) { next(error); }
+});
 app.use('/api', mobileVersionGate);
 
 app.use('/api', writeRateLimiter);

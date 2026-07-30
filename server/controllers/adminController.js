@@ -1813,14 +1813,21 @@ async function getRealtimeLogs(req, res) {
             const { getRecentLogs } = require('../utils/logger');
             // 修复: getRecentLogs 改为异步,需要用 await
             const rawLines = await getRecentLogs(logLimit);
-            const fileLogs = rawLines.map(line => {
+            const fileLogs = rawLines.reduce((logs, line) => {
                 // 解析格式: [2024-01-01T00:00:00.000Z] [LEVEL] [tag] message
                 const match = line.match(/^\[([^\]]+)\]\s+\[([^\]]+)\]\s+\[([^\]]+)\]\s+(.*)$/);
                 if (match) {
-                    return { time: match[1], level: match[2], tag: match[3], message: match[4] };
+                    logs.push({ time: match[1], level: match[2], tag: match[3], message: match[4] });
+                } else if (logs.length) {
+                    // Error.stack 会跨多行写入文件；续行应属于上一条日志，而不是
+                    // 伪造成一个没有时间戳的新日志条目。
+                    logs[logs.length - 1].message += `\n${line}`;
+                } else {
+                    // 读取文件尾部时可能正好从一段堆栈中间开始。
+                    logs.push({ time: null, level: 'INFO', tag: 'raw', message: line });
                 }
-                return { time: '', level: 'INFO', tag: 'raw', message: line };
-            });
+                return logs;
+            }, []);
             if (lastTime) {
                 const lastTimeDate = new Date(lastTime);
                 result.fileLogs = fileLogs.filter(log => log.time && new Date(log.time) > lastTimeDate);
@@ -3522,6 +3529,29 @@ async function deleteAnnouncement(req, res) {
 }
 
 // ==================== 系统设置 ====================
+
+function updateEnvVariable(content, key, value) {
+    const safeValue = String(value ?? '');
+    if (/[\r\n\0]/.test(safeValue)) {
+        const error = new Error(`${key} 包含非法换行字符`);
+        error.statusCode = 400;
+        throw error;
+    }
+    const escapedValue = safeValue.replace(/(["\\])/g, '\\$1');
+    const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`^${escapedKey}=.*$`, 'gm');
+    return regex.test(content)
+        ? content.replace(regex, `${key}="${escapedValue}"`)
+        : `${content}${content && !content.endsWith('\n') ? '\n' : ''}${key}="${escapedValue}"`;
+}
+
+function redactConfigDetails(configs = {}) {
+    const redacted = {};
+    for (const [key, value] of Object.entries(configs)) {
+        redacted[key] = /password|secret|token|api[_-]?key|auth/i.test(key) ? '***' : value;
+    }
+    return redacted;
+}
 
 async function getSystemConfigs(req, res) {
     try {

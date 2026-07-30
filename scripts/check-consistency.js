@@ -169,7 +169,8 @@ check(!dbMigrationRoutes.includes('${error.message}'), 'database migration route
 const adminController = read('server/controllers/adminController.js');
 check(adminController.includes('canManageUser(operatorRole, user.role)'), 'impersonation should forbid same-or-higher role targets.');
 check(adminController.includes('function canManageExistingUser') && adminController.includes('VALID_USER_STATUSES'), 'admin user management should reject same-or-higher targets and invalid statuses.');
-check(adminController.includes('redactConfigDetails'), 'system config logging should redact secrets.');
+check(adminController.includes('function updateEnvVariable') && adminController.includes('function redactConfigDetails'), 'system config helpers should be defined, not merely referenced.');
+check(adminController.includes("logs[logs.length - 1].message += `\\n${line}`"), 'multiline error stacks should remain attached to their timestamped log entry.');
 check(adminController.includes('targetCount = Math.min') && adminController.includes('targetLimit = Math.min'), 'crawler admin endpoints should clamp requested limits.');
 const adminWorksStart = adminController.indexOf('async function getWorks(req, res)');
 const adminWorksEnd = adminController.indexOf('async function updateWork(req, res)', adminWorksStart);

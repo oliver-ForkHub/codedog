@@ -5602,7 +5602,9 @@ const handleCrawlHot = async () => {
 }
 
 const formatLogTime = (time) => {
+  if (!time) return ''
   const d = new Date(time)
+  if (Number.isNaN(d.getTime())) return ''
   return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
 

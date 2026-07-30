@@ -14,7 +14,7 @@ export function WorkCard({ work, compact, onPress, onLongPress }: Props) {
     <Pressable accessibilityRole="button" onPress={onPress} onLongPress={onLongPress} style={({ pressed }) => [styles.card, compact && styles.compact, pressed && styles.pressed]}>
       <View style={[styles.cover, compact && styles.compactCover]}>
         {imageUrl ? (
-          <Image source={{ uri: imageUrl }} style={styles.image} resizeMode="cover" />
+          <Image source={{ uri: imageUrl }} style={styles.image} resizeMode="contain" />
         ) : (
           <View style={styles.placeholder}><Ionicons name="cube-outline" size={32} color={colors.subtle} /></View>
         )}
@@ -37,15 +37,15 @@ export function WorkCard({ work, compact, onPress, onLongPress }: Props) {
 const styles = StyleSheet.create({
   card: { width: 202, overflow: 'hidden', borderRadius: 18, backgroundColor: colors.surface, ...shadow },
   compact: { width: '48.4%', marginBottom: 14 },
-  cover: { height: 128, backgroundColor: colors.blueSoft },
-  compactCover: { height: 112 },
+  cover: { width: '100%', aspectRatio: 16 / 9, backgroundColor: '#EEF1F5' },
+  compactCover: { height: undefined },
   image: { width: '100%', height: '100%' },
   placeholder: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   tag: { position: 'absolute', top: 10, left: 10, overflow: 'hidden', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, backgroundColor: 'rgba(23,32,51,.82)', color: '#FFF', fontSize: 10, fontWeight: '700' },
-  body: { padding: 12 },
+  body: { paddingHorizontal: 11, paddingTop: 9, paddingBottom: 8 },
   title: { color: colors.ink, fontSize: 15, fontWeight: '800' },
-  author: { marginTop: 4, color: colors.muted, fontSize: 12 },
-  meta: { marginTop: 10, flexDirection: 'row', alignItems: 'center', gap: 4 },
+  author: { marginTop: 2, color: colors.muted, fontSize: 12 },
+  meta: { marginTop: 6, flexDirection: 'row', alignItems: 'center', gap: 4 },
   metaText: { marginRight: 7, color: colors.subtle, fontSize: 11 },
   pressed: { opacity: 0.76, transform: [{ scale: 0.985 }] },
 });

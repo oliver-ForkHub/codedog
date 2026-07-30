@@ -1,12 +1,18 @@
-import { apiDelete, apiGet, apiPost, apiPut } from './client';
-import type { CommunityPage, Post, Studio, StudioDetail } from '../types/community';
+import type { CommunityPage, ForumBoard, Post, PostDraft, Studio, StudioDetail } from '../types/community';
+import { apiDelete, apiGet, apiMultipart, apiPost, apiPut } from './client';
 
 export const communityApi = {
-  posts(params: { page?: number; pageSize?: number; keyword?: string; sortBy?: string } = {}) {
+  posts(params: { page?: number; pageSize?: number; keyword?: string; sortBy?: string; category?: string; isTop?: string } = {}) {
     return apiGet<CommunityPage<Post>>('/posts', params);
   },
   post(id: number) { return apiGet<Post>(`/posts/${id}`); },
-  createPost(data: { title: string; content: string; category: string }) { return apiPost<Post>('/posts', data); },
+  boards() { return apiGet<ForumBoard[]>('/posts/boards/list'); },
+  createPost(data: { title: string; content: string; board_id: number; studio_id?: number; post_type: string; tags: string[]; cover?: string }) { return apiPost<Post>('/posts', data); },
+  uploadImage(uri: string, fileName = 'cover.jpg', mimeType = 'image/jpeg') {
+    const form = new FormData();
+    form.append('image', { uri, name: fileName, type: mimeType } as unknown as Blob);
+    return apiMultipart<{ url: string }>('/uploads/image', 'POST', form);
+  },
   studios(params: { page?: number; pageSize?: number; keyword?: string } = {}) {
     return apiGet<CommunityPage<Studio>>('/studios', params);
   },
@@ -22,7 +28,7 @@ export const communityApi = {
   myPosts() { return apiGet<CommunityPage<Post>>('/posts/my/list', { page: 1, pageSize: 50 }); },
   updatePost(id: number, data: { title: string; content: string; category?: string }) { return apiPut<Post>(`/posts/${id}`, data); },
   deletePost(id: number) { return apiDelete<null>(`/posts/${id}`); },
-  getDraft() { return apiGet<{ title?: string; content?: string; category?: string } | null>('/posts/drafts/current'); },
-  saveDraft(data: { title: string; content: string; category: string }) { return apiPut<unknown>('/posts/drafts/current', data); },
+  getDraft() { return apiGet<PostDraft | null>('/posts/drafts/current'); },
+  saveDraft(data: PostDraft) { return apiPut<unknown>('/posts/drafts/current', data); },
   deleteDraft() { return apiDelete<null>('/posts/drafts/current'); },
 };

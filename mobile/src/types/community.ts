@@ -22,6 +22,24 @@ export type Post = {
   collection_count?: number;
 };
 
+export type ForumBoard = {
+  id: number;
+  name: string;
+  slug: string;
+  icon?: string;
+  description?: string;
+  color?: string;
+};
+
+export type PostDraft = {
+  title?: string;
+  content?: string;
+  board_id?: number | null;
+  post_type?: 'discussion' | 'question' | 'tutorial';
+  cover?: string;
+  tags?: string[];
+};
+
 export type Studio = {
   id: number;
   name: string;

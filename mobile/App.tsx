@@ -5,6 +5,7 @@ import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { CaptchaProvider } from './src/components/CaptchaProvider';
+import { VersionGate } from './src/components/VersionGate';
 
 import { HomeScreen } from './src/screens/HomeScreen';
 import { ForumScreen } from './src/screens/ForumScreen';
@@ -86,6 +87,7 @@ const linking = {
 export default function App() {
   return (
     <SafeAreaProvider>
+     <VersionGate>
       <SessionProvider>
        <CaptchaProvider>
         <NavigationContainer theme={navigationTheme} linking={linking}>
@@ -121,6 +123,7 @@ export default function App() {
         </NavigationContainer>
        </CaptchaProvider>
       </SessionProvider>
+     </VersionGate>
     </SafeAreaProvider>
   );
 }

@@ -36,6 +36,7 @@ const openRoutes = require('./routes/openRoutes');
 const { hcaptchaGuard } = require('./middleware/hcaptcha');
 const { createRateLimiter } = require('./middleware/rateLimit');
 const { ipBanMiddleware } = require('./middleware/ipBan');
+const { getMobileVersionPolicy, mobileVersionGate } = require('./middleware/mobileVersion');
 const { createSequelizeSessionStore } = require('./services/sessionStore');
 
 const app = express();
@@ -242,6 +243,9 @@ app.use(session(sessionOptions));
 
 // IP 封禁中间件: 置于限流之前,被封禁 IP 直接 403,不占用限流配额
 app.use(ipBanMiddleware);
+
+app.get('/api/mobile/version', (req, res) => res.json({ code: 200, msg: 'ok', data: getMobileVersionPolicy() }));
+app.use('/api', mobileVersionGate);
 
 app.use('/api', writeRateLimiter);
 app.use('/api/users/login', loginRateLimiter);

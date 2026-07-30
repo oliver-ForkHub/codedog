@@ -1,6 +1,11 @@
 import { Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 
+export const APP_VERSION = '1.1.0';
+export type UpgradePolicy = { minimum_version: string; latest_version: string; update_url: string; message: string; force_update?: boolean };
+let upgradeHandler: ((policy: UpgradePolicy) => void) | null = null;
+export function setUpgradeHandler(handler: ((policy: UpgradePolicy) => void) | null) { upgradeHandler = handler; }
+
 type ApiEnvelope<T> = {
   code: number;
   msg: string;
@@ -76,6 +81,9 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}, par
     credentials: 'include',
     headers: {
       Accept: 'application/json',
+      'X-App-Platform': Platform.OS,
+      'X-App-Version': APP_VERSION,
+      'X-App-Build': '2',
       ...(options.body && !isFormData ? { 'Content-Type': 'application/json' } : {}),
       ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
       ...options.headers,
@@ -84,6 +92,7 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}, par
   const body = (await response.json().catch(() => null)) as ApiEnvelope<T> | null;
 
   if (!response.ok || !body || body.code !== 200) {
+    if (response.status === 426 && body?.data) upgradeHandler?.(body.data as unknown as UpgradePolicy);
     const message = body?.msg || '';
     if (!captchaRetried && captchaHandler && /验证码|安全验证/.test(message) && !path.startsWith('/geetest/')) {
       const fields = await captchaHandler(captchaScene(path, String(options.method || 'GET').toUpperCase()), /hcaptcha/i.test(message) ? 'hcaptcha' : 'geetest');

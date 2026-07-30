@@ -67,7 +67,11 @@ function contextMatchResult(req, payload) {
   const networkMatch = context.ips.map(networkKey).filter(Boolean).some(network => signedNetworkHashes.some(hash => safeEqual(hash, boundHash(payload.binding_nonce, network))));
   const ipMatches = exactMatch || networkMatch;
   const browserMatches = safeEqual(payload.browser_hash, boundHash(payload.binding_nonce, context.browser));
-  return { matches: ipMatches && browserMatches, ipMatches, browserMatches, candidateCount: context.ips.length, matchType: exactMatch ? 'exact' : networkMatch ? 'network' : 'none' };
+  // The community and IM can sit behind different proxy/CDN paths, and mobile
+  // carriers may rotate the public address during the redirect. Treat the
+  // signed address as a risk signal instead of invalidating an otherwise valid
+  // short-lived, one-time, browser-bound ticket/session.
+  return { matches: browserMatches, ipMatches, browserMatches, candidateCount: context.ips.length, matchType: exactMatch ? 'exact' : networkMatch ? 'network' : browserMatches ? 'browser_only' : 'none' };
 }
 function contextMatches(req, payload) { return contextMatchResult(req, payload).matches; }
 
@@ -88,6 +92,9 @@ async function exchangeTicket(ticket, req) {
   });
   if (payload.purpose !== 'im_sso' || !payload.jti || !payload.sub) throw new Error('Invalid IM ticket');
   const match = contextMatchResult(req, payload);
+  if (match.matches && !match.ipMatches) {
+    console.warn(`[IM SSO] network address changed; accepted browser-bound one-time ticket candidates=${match.candidateCount}`);
+  }
   if (!match.matches) {
     const diagnosticId = crypto.randomBytes(4).toString('hex').toUpperCase();
     const mismatch = [!match.ipMatches && '网络地址', !match.browserMatches && '浏览器标识'].filter(Boolean).join('、') || '登录环境';

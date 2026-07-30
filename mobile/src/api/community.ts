@@ -1,7 +1,8 @@
-import type { CommunityPage, ForumBoard, Post, PostDraft, Studio, StudioDetail } from '../types/community';
+import type { Banner, CommunityPage, ForumBoard, Post, PostDraft, Studio, StudioDetail } from '../types/community';
 import { apiDelete, apiGet, apiMultipart, apiPost, apiPut } from './client';
 
 export const communityApi = {
+  banners() { return apiGet<Banner[]>('/public/banners'); },
   posts(params: { page?: number; pageSize?: number; keyword?: string; sortBy?: string; category?: string; isTop?: string } = {}) {
     return apiGet<CommunityPage<Post>>('/posts', params);
   },

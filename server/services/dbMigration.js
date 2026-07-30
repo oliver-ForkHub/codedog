@@ -168,6 +168,10 @@ class DatabaseMigration {
             // 修复: 补齐与 models/index.js 一致的字段,避免迁移后生产报"列不存在"
             token_version: { type: DataTypes.INTEGER, defaultValue: 0 },
             password_changed_at: { type: DataTypes.DATE, allowNull: true }
+            ,app_last_login_at: { type: DataTypes.DATE, allowNull: true }
+            ,app_last_platform: { type: DataTypes.STRING(20), allowNull: true }
+            ,app_last_version: { type: DataTypes.STRING(30), allowNull: true }
+            ,app_last_build: { type: DataTypes.STRING(30), allowNull: true }
         }, {
             tableName: 'users',
             timestamps: true,

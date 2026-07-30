@@ -1,7 +1,7 @@
 import { Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 
-export const APP_VERSION = '1.1.0';
+export const APP_VERSION = '1.1.1';
 export type UpgradePolicy = { minimum_version: string; latest_version: string; update_url: string; message: string; force_update?: boolean };
 let upgradeHandler: ((policy: UpgradePolicy) => void) | null = null;
 export function setUpgradeHandler(handler: ((policy: UpgradePolicy) => void) | null) { upgradeHandler = handler; }
@@ -83,7 +83,7 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}, par
       Accept: 'application/json',
       'X-App-Platform': Platform.OS,
       'X-App-Version': APP_VERSION,
-      'X-App-Build': '2',
+      'X-App-Build': '3',
       ...(options.body && !isFormData ? { 'Content-Type': 'application/json' } : {}),
       ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
       ...options.headers,

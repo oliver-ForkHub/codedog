@@ -322,6 +322,13 @@ async function codemaoLogin(req, res, identity, password) {
         if (req.path === '/mobile/login') {
             responseData.access_token = token;
             responseData.token_type = 'Bearer';
+            const appLogin = {
+                app_last_login_at: new Date(),
+                app_last_platform: String(req.get('x-app-platform') || 'unknown').slice(0, 20),
+                app_last_version: String(req.get('x-app-version') || 'unknown').slice(0, 30),
+                app_last_build: String(req.get('x-app-build') || 'unknown').slice(0, 30)
+            };
+            await DbAdapter.update(User, appLogin, { where: { id: DbAdapter.getId(user) } });
         }
         return successResponse(res, responseData, message);
     } catch (error) {

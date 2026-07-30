@@ -288,8 +288,16 @@
                     <el-button v-if="tokenRevealed" size="small" type="danger" plain @click="tokenRevealed = false">隐藏</el-button>
                   </div>
                 </div>
-              </div>
-              <div class="r-admin--user_detail_actions" style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px;">
+            </div>
+            <el-descriptions :column="2" border style="margin: 16px 0;">
+              <el-descriptions-item label="是否登录过 App">
+                <el-tag :type="userDetail.user.app_last_login_at ? 'success' : 'info'">{{ userDetail.user.app_last_login_at ? '是' : '否' }}</el-tag>
+              </el-descriptions-item>
+              <el-descriptions-item label="最后 App 登录">{{ userDetail.user.app_last_login_at ? formatDate(userDetail.user.app_last_login_at) : '从未登录' }}</el-descriptions-item>
+              <el-descriptions-item label="App 平台">{{ userDetail.user.app_last_platform || '-' }}</el-descriptions-item>
+              <el-descriptions-item label="App 版本">{{ userDetail.user.app_last_version ? `${userDetail.user.app_last_version}（构建 ${userDetail.user.app_last_build || '-'}）` : '-' }}</el-descriptions-item>
+            </el-descriptions>
+            <div class="r-admin--user_detail_actions" style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px;">
                 <el-button type="primary" size="small" @click="showRoleDialog(userDetail.user)">修改角色</el-button>
                 <el-button size="small" @click="showPasswordDialog">修改密码</el-button>
                 <el-button type="warning" size="small" @click="showSendNotificationDialog">发送站内信</el-button>
@@ -3436,7 +3444,7 @@ const configForm = ref({
   mysql_password: '',
   sensitive_check_mode: 'builtin',
   mobile_android_min_version: '1.1.0',
-  mobile_android_latest_version: '1.1.0',
+  mobile_android_latest_version: '1.1.1',
   mobile_android_update_url: 'https://github.com/txcxgzs/codedog/releases/download/mobile-latest/codedog-mobile.apk',
   mobile_android_update_message: '当前版本已停止服务，请更新后继续使用。'
 })
@@ -3646,7 +3654,7 @@ const fetchConfigs = async () => {
       form.mysql_password = data.mysql_password || ''
       form.sensitive_check_mode = data.sensitive_check_mode || 'builtin'
       form.mobile_android_min_version = data.mobile_android_min_version || '1.1.0'
-      form.mobile_android_latest_version = data.mobile_android_latest_version || '1.1.0'
+      form.mobile_android_latest_version = data.mobile_android_latest_version || '1.1.1'
       form.mobile_android_update_url = data.mobile_android_update_url || 'https://github.com/txcxgzs/codedog/releases/download/mobile-latest/codedog-mobile.apk'
       form.mobile_android_update_message = data.mobile_android_update_message || '当前版本已停止服务，请更新后继续使用。'
       if (data.hcaptcha_expire_minutes) {

@@ -413,6 +413,10 @@ async function startServer() {
             // User 表新增字段
             await ensureColumn('users', 'token_version', { sqlite: 'INTEGER DEFAULT 0', mysql: 'INT DEFAULT 0' });
             await ensureColumn('users', 'password_changed_at', { sqlite: 'DATETIME', mysql: 'DATETIME NULL' });
+            await ensureColumn('users', 'app_last_login_at', { sqlite: 'DATETIME', mysql: 'DATETIME NULL' });
+            await ensureColumn('users', 'app_last_platform', { sqlite: 'VARCHAR(20)', mysql: 'VARCHAR(20) NULL' });
+            await ensureColumn('users', 'app_last_version', { sqlite: 'VARCHAR(30)', mysql: 'VARCHAR(30) NULL' });
+            await ensureColumn('users', 'app_last_build', { sqlite: 'VARCHAR(30)', mysql: 'VARCHAR(30) NULL' });
             // 个人主页封面和收藏公开设置。模型新增字段必须同步加入启动预检，
             // 否则旧数据库在登录查询 User 全字段时会因 no such column 直接返回 500。
             await ensureColumn('users', 'profile_cover', { sqlite: 'VARCHAR(500)', mysql: 'VARCHAR(500) NULL' });

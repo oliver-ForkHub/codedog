@@ -65,3 +65,4 @@ export type StudioDetail = {
 };
 
 export type CommunityPage<T> = { list: T[]; total: number; page?: number; totalPages?: number };
+export type Banner = { id:number; title:string; image_url:string; link_url?:string|null };

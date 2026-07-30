@@ -1,5 +1,5 @@
 const { SystemConfig } = require('../models');
-const DEFAULTS = { mobile_android_min_version:'1.1.0', mobile_android_latest_version:'1.1.0', mobile_android_update_url:'https://github.com/txcxgzs/codedog/releases/download/mobile-latest/codedog-mobile.apk', mobile_android_update_message:'当前版本已停止服务，请更新后继续使用。' };
+const DEFAULTS = { mobile_android_min_version:'1.1.0', mobile_android_latest_version:'1.1.1', mobile_android_update_url:'https://github.com/txcxgzs/codedog/releases/download/mobile-latest/codedog-mobile.apk', mobile_android_update_message:'当前版本已停止服务，请更新后继续使用。' };
 let cache=null;
 function parseVersion(v){const m=String(v||'').trim().match(/^(\d+)\.(\d+)\.(\d+)$/);return m?m.slice(1).map(Number):null;}
 function compareVersions(l,r){const a=parseVersion(l),b=parseVersion(r);if(!a||!b)return null;for(let i=0;i<3;i+=1)if(a[i]!==b[i])return a[i]>b[i]?1:-1;return 0;}

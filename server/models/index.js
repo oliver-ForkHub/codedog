@@ -61,6 +61,10 @@ const User = sequelize.define('User', {
     token_version: { type: DataTypes.INTEGER, defaultValue: 0 },
     // 密码修改时间戳，adminController 重置密码时更新此字段，用于强制旧 token 失效等场景
     password_changed_at: { type: DataTypes.DATE, allowNull: true },
+    app_last_login_at: { type: DataTypes.DATE, allowNull: true },
+    app_last_platform: { type: DataTypes.STRING(20), allowNull: true },
+    app_last_version: { type: DataTypes.STRING(30), allowNull: true },
+    app_last_build: { type: DataTypes.STRING(30), allowNull: true },
     is_active_dalao: { type: DataTypes.BOOLEAN, defaultValue: false }
 }, Object.assign({ tableName: 'users' }, TIMESTAMP_OPTS));
 

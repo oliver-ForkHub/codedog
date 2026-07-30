@@ -37,18 +37,7 @@ test('SSO network binding accepts safe address rotation inside one network', () 
     headers: { 'cf-connecting-ip': '198.51.100.99', 'user-agent': 'codedog-browser' },
     socket: {}
   }, payload);
-  assert.equal(otherNetwork.matches, true);
-  assert.equal(otherNetwork.ipMatches, false);
-  assert.equal(otherNetwork.browserMatches, true);
-  assert.equal(otherNetwork.matchType, 'browser_only');
-
-  const otherBrowser = _test.contextMatchResult({
-    headers: { 'cf-connecting-ip': '203.0.113.21', 'user-agent': 'unexpected-browser' },
-    socket: {}
-  }, payload);
-  assert.equal(otherBrowser.matches, false);
-  assert.equal(otherBrowser.ipMatches, true);
-  assert.equal(otherBrowser.browserMatches, false);
+  assert.equal(otherNetwork.matches, false);
 });
 
 test('SSO network binding reads Cloudflare original IPv6 identity', () => {

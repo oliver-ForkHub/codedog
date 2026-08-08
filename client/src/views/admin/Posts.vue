@@ -42,6 +42,69 @@
       </div>
     </section>
 
+    <!-- 待审查专区：命中敏感词但已发布的帖子，等待人工二次审核 -->
+    <section class="r-admin-posts--pending_review" v-loading="pendingReviewLoading">
+      <div class="r-admin-posts--pending_head">
+        <div>
+          <h2>敏感词待审查 <el-badge :value="pendingReviewTotal" :hidden="pendingReviewTotal === 0" type="warning" /></h2>
+          <p>用户发帖命中敏感词后已直接发布，但被标记为待人工二次审核。审核后记录完整审计日志。</p>
+        </div>
+        <el-button text @click="fetchPendingReviewPosts">刷新</el-button>
+      </div>
+      <el-empty v-if="!pendingReviewPosts.length && !pendingReviewLoading" description="当前没有待审查内容" :image-size="48" />
+      <el-table v-else :data="pendingReviewPosts" stripe size="small">
+        <el-table-column prop="id" label="ID" width="70" />
+        <el-table-column prop="title" label="标题" min-width="200" show-overflow-tooltip />
+        <el-table-column label="作者" width="120">
+          <template #default="{ row }">{{ row.author?.nickname || row.author?.username }}</template>
+        </el-table-column>
+        <el-table-column label="命中词" min-width="180">
+          <template #default="{ row }">
+            <el-tag v-for="word in (row.sensitive_info?.violations || [])" :key="word" size="small" type="warning" style="margin-right:4px">{{ word }}</el-tag>
+            <el-tag size="small" type="info">{{ riskLevelText(row.sensitive_info?.riskLevel) }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="板块" width="120">
+          <template #default="{ row }">{{ row.board ? `${row.board.icon} ${row.board.name}` : '未分区' }}</template>
+        </el-table-column>
+        <el-table-column label="发布时间" width="160">
+          <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
+        </el-table-column>
+        <el-table-column label="操作" width="120" fixed="right">
+          <template #default="{ row }">
+            <el-button size="small" type="primary" @click="openPendingReview(row)">审核</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <div v-if="pendingReviewTotal > pendingReviewPageSize" class="r-admin-posts--pagination">
+        <el-pagination v-model:current-page="pendingReviewPage" :page-size="pendingReviewPageSize" :total="pendingReviewTotal" layout="total, prev, pager, next" @current-change="fetchPendingReviewPosts" />
+      </div>
+    </section>
+
+    <!-- 待审查审核对话框 -->
+    <el-dialog v-model="pendingReviewDetailVisible" title="敏感词审核" width="min(560px, 92vw)" append-to-body>
+      <div v-if="pendingReviewTarget">
+        <el-descriptions :column="1" border size="small" style="margin-bottom:16px">
+          <el-descriptions-item label="帖子">{{ pendingReviewTarget.title }} (#{{ pendingReviewTarget.id }})</el-descriptions-item>
+          <el-descriptions-item label="作者">{{ pendingReviewTarget.author?.nickname || pendingReviewTarget.author?.username }}</el-descriptions-item>
+          <el-descriptions-item label="命中词">
+            <el-tag v-for="word in (pendingReviewTarget.sensitive_info?.violations || [])" :key="word" size="small" type="warning" style="margin-right:4px">{{ word }}</el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="风险等级">{{ riskLevelText(pendingReviewTarget.sensitive_info?.riskLevel) }}</el-descriptions-item>
+          <el-descriptions-item label="内容预览"><div style="max-height:160px;overflow:auto;white-space:pre-wrap">{{ pendingReviewTarget.content }}</div></el-descriptions-item>
+        </el-descriptions>
+        <el-form label-width="90px">
+          <el-form-item label="审核原因"><el-input v-model="pendingReviewReason" type="textarea" :rows="2" maxlength="500" show-word-limit placeholder="删除操作必填，其他操作可选" /></el-form-item>
+        </el-form>
+      </div>
+      <template #footer>
+        <el-button @click="pendingReviewDetailVisible = false">取消</el-button>
+        <el-button type="info" plain @click="submitPendingReview('ignore')">忽略</el-button>
+        <el-button type="success" @click="submitPendingReview('pass')">通过</el-button>
+        <el-button type="danger" @click="submitPendingReview('delete')">删除</el-button>
+      </template>
+    </el-dialog>
+
     <el-dialog v-model="attentionSettingsVisible" title="需要关注 · 预警规则" width="min(500px, 92vw)" append-to-body>
       <p class="r-admin-posts--settings_intro">达到任一条件的帖子会进入“需要关注”。浏览和点赞统计窗口固定为近 2 小时。</p>
       <el-form label-width="150px">
@@ -77,6 +140,12 @@
           <el-tag :type="row.status === 'published' ? 'success' : row.status === 'hidden' ? 'warning' : 'info'">
             {{ row.status === 'published' ? '正常' : row.status === 'hidden' ? '隐藏' : row.status === 'draft' ? '草稿' : row.status }}
           </el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="待审查" width="100">
+        <template #default="{ row }">
+          <el-tag v-if="postPendingFlag(row)" type="danger" effect="dark" size="small" @click="openPendingReview(row)" style="cursor:pointer">命中敏感词</el-tag>
+          <span v-else style="color:#98a2b3">—</span>
         </template>
       </el-table-column>
       <el-table-column label="操作" width="100" fixed="right">
@@ -143,7 +212,7 @@
           <el-descriptions-item label="点赞">{{ editingPost.like_count }}</el-descriptions-item>
           <el-descriptions-item label="评论">{{ editingPost.comment_count }}</el-descriptions-item>
           <el-descriptions-item label="状态">
-            <el-tag :type="editingPost.status === 'active' ? 'success' : 'info'">{{ editingPost.status === 'active' ? '正常' : '隐藏' }}</el-tag>
+            <el-tag :type="editingPost.status === 'published' ? 'success' : editingPost.status === 'hidden' ? 'warning' : 'info'">{{ editingPost.status === 'published' ? '正常' : editingPost.status === 'hidden' ? '隐藏' : editingPost.status === 'draft' ? '草稿' : editingPost.status === 'deleted' ? '已删除' : editingPost.status }}</el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="创建时间">{{ formatDate(editingPost.created_at) }}</el-descriptions-item>
           <el-descriptions-item label="更新时间">{{ formatDate(editingPost.updated_at) }}</el-descriptions-item>
@@ -231,6 +300,16 @@ const pageSize = ref(10)
 const total = ref(0)
 const searchKeyword = ref('')
 const overviewLoading = ref(false)
+
+// 待审查专区数据：命中敏感词但已发布的帖子，等待人工二次审核
+const pendingReviewLoading = ref(false)
+const pendingReviewPosts = ref([])
+const pendingReviewTotal = ref(0)
+const pendingReviewPage = ref(1)
+const pendingReviewPageSize = ref(5)
+const pendingReviewDetailVisible = ref(false)
+const pendingReviewTarget = ref(null)
+const pendingReviewReason = ref('')
 const overview = reactive({
   scope: 'all',
   metrics: { total_published: 0, total_replies: 0, today_topics: 0, today_replies: 0, active_authors_30d: 0, unanswered_questions: 0, stale_questions: 0, locked_topics: 0, hidden_topics: 0, essence_topics: 0 },
@@ -304,7 +383,7 @@ const saveAttentionSettings = async () => {
   finally { attentionSettingsSaving.value = false }
 }
 
-const refreshAll = () => Promise.all([fetchPosts(), fetchOverview()])
+const refreshAll = () => Promise.all([fetchPosts(), fetchOverview(), fetchPendingReviewPosts()])
 
 const fetchPosts = async () => {
   loading.value = true
@@ -313,6 +392,65 @@ const fetchPosts = async () => {
     if (res.code === 200) { posts.value = res.data.list; total.value = res.data.total }
   } catch (e) { ElMessage.error('获取帖子列表失败') } finally { loading.value = false }
 }
+
+// 获取待审查帖子（命中敏感词的帖子）
+const fetchPendingReviewPosts = async () => {
+  pendingReviewLoading.value = true
+  try {
+    const res = await adminApi.getPendingReviewPosts({ page: pendingReviewPage.value, pageSize: pendingReviewPageSize.value })
+    if (res.code === 200) { pendingReviewPosts.value = res.data.list; pendingReviewTotal.value = res.data.total }
+  } catch (e) { ElMessage.error('获取待审查帖子失败') } finally { pendingReviewLoading.value = false }
+}
+
+// 打开审核对话框
+// 列表行可能只有 moderation_logs 数组，专区行有 sensitive_info 字段，统一兼容
+const openPendingReview = (post) => {
+  let target = post
+  // 如果传入的是列表行（有 moderation_logs 无 sensitive_info），构造 sensitive_info
+  if (!post.sensitive_info && post.moderation_logs) {
+    const log = post.moderation_logs.find(item => item.action === 'sensitive_detected')
+    if (log) {
+      let state = null
+      try { state = JSON.parse(log.after_state || '{}') } catch { state = {} }
+      target = { ...post, sensitive_info: state }
+    }
+  }
+  pendingReviewTarget.value = target
+  pendingReviewReason.value = ''
+  pendingReviewDetailVisible.value = true
+}
+
+// 提交审核操作：pass/delete/ignore
+const submitPendingReview = async (action) => {
+  if (!pendingReviewTarget.value) return
+  // delete 操作必须填写原因
+  if (action === 'delete' && !pendingReviewReason.value.trim()) {
+    ElMessage.warning('删除操作必须填写原因')
+    return
+  }
+  try {
+    const res = await adminApi.reviewPendingPost(pendingReviewTarget.value.id, action, pendingReviewReason.value.trim())
+    if (res.code === 200) {
+      ElMessage.success(res.msg || '审核完成')
+      pendingReviewDetailVisible.value = false
+      // refreshAll 已包含 fetchPendingReviewPosts，避免重复请求
+      await refreshAll()
+    }
+  } catch (e) { ElMessage.error(e.response?.data?.msg || '审核失败') }
+}
+
+// 判断帖子是否处于待审查状态（命中敏感词但未审核）
+const postPendingFlag = (row) => {
+  if (!row?.moderation_logs) return null
+  const sensitiveLog = row.moderation_logs.find(log => log.action === 'sensitive_detected')
+  if (!sensitiveLog) return null
+  let state = null
+  try { state = JSON.parse(sensitiveLog.after_state || '{}') } catch { state = {} }
+  return state && state.reviewed !== true ? sensitiveLog : null
+}
+
+// 风险等级汉化：low → 低，medium → 中等，high → 高（与发帖提示“中等风险”文案一致）
+const riskLevelText = level => ({ low: '低', medium: '中等', high: '高' }[level] || level || '未知')
 
 const handleSearch = () => { currentPage.value = 1; fetchPosts() }
 
@@ -534,6 +672,10 @@ onMounted(refreshAll)
 <style lang="scss" scoped>
 .r-admin-posts--page { background: #fff; border-radius: 12px; padding: 24px; }
 .r-admin-posts--overview { margin-bottom:24px; padding:20px; border:1px solid #edf0f5; border-radius:16px; background:linear-gradient(145deg,#fff 60%,#fff9e8); }
+.r-admin-posts--pending_review { margin-bottom:24px; padding:20px; border:1px solid #ffe3a3; border-radius:16px; background:linear-gradient(145deg,#fffdf7,#fff); }
+.r-admin-posts--pending_head { display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:14px; }
+.r-admin-posts--pending_head h2 { margin:0; color:#202a3d; font-size:18px; }
+.r-admin-posts--pending_head p { margin:5px 0 0; color:#98a2b3; font-size:12px; }
 .r-admin-posts--overview_head { display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:16px; }
 .r-admin-posts--overview_head h2 { margin:0; color:#202a3d; font-size:20px; }
 .r-admin-posts--overview_head p { margin:5px 0 0; color:#98a2b3; font-size:12px; }

@@ -274,7 +274,60 @@ app.get('/api/groups/:id', requireSession, async (req, res, next) => {
     const { group, actor } = await groupAndActor(req.params.id, req.user.id);
     if (!group || !actor) return fail(res, 404, '群聊不存在或你不是群成员');
     const members = await ConversationMember.findAll({ where: { conversation_id: req.params.id, state: 'active' }, order: [['created_at', 'ASC']] });
-    ok(res, { ...group.toJSON(), members: members.map(item => item.toJSON()) });
+    // 附带成员用户资料，供前端群管理面板展示昵称/头像
+    const profiles = await usersById(members.map(item => item.user_id));
+    ok(res, {
+      ...group.toJSON(),
+      member_count: members.length,
+      my_role: actor.role,
+      members: members.map(item => ({ ...item.toJSON(), user: profiles.get(Number(item.user_id)) || null }))
+    });
+  } catch (error) { next(error); }
+});
+
+// 转让群主：仅群主可将群主身份转让给群内任一活跃成员，转让后原群主降为管理员
+app.post('/api/groups/:id/transfer', requireSession, async (req, res, next) => {
+  try {
+    const { group, actor } = await groupAndActor(req.params.id, req.user.id);
+    if (!group || !actor) return fail(res, 404, '群聊不存在');
+    if (actor.role !== 'owner') return fail(res, 403, '只有群主可以转让群聊');
+    const userId = Number(req.body?.user_id);
+    if (!Number.isInteger(userId) || userId <= 0) return fail(res, 400, '无效用户 ID');
+    if (Number(userId) === Number(actor.user_id)) return fail(res, 400, '不能转让给自己');
+    const target = await ConversationMember.findOne({ where: { conversation_id: req.params.id, user_id: userId, state: 'active' } });
+    if (!target) return fail(res, 404, '目标成员不在该群聊中');
+    // 事务内完成角色互换与群主记录更新，任一步失败整体回滚
+    await sequelize.transaction(async transaction => {
+      actor.role = 'admin'; await actor.save({ transaction });
+      target.role = 'owner'; await target.save({ transaction });
+      group.owner_id = Number(userId); await group.save({ transaction });
+    });
+    broadcastConversation(req.params.id, 'member.updated', { user_id: Number(actor.user_id), role: 'admin' });
+    broadcastConversation(req.params.id, 'member.updated', { user_id: Number(userId), role: 'owner' });
+    broadcastConversation(req.params.id, 'conversation.updated', group.toJSON());
+    ok(res, { owner_id: Number(userId) }, '群主已转让');
+  } catch (error) { next(error); }
+});
+
+// 解散群聊：仅群主可解散；全员移除成员关系并删除群资料，群聊从此不可加入
+app.post('/api/groups/:id/dissolve', requireSession, async (req, res, next) => {
+  try {
+    const { group, actor } = await groupAndActor(req.params.id, req.user.id);
+    if (!group || !actor) return fail(res, 404, '群聊不存在');
+    if (actor.role !== 'owner') return fail(res, 403, '只有群主可以解散群聊');
+    // 状态变更前先取出全部 active 成员：
+    // 解散后成员都是 removed，broadcastConversation 只能发给 active 名单，会导致在线群员收不到通知
+    const beforeMembers = await ConversationMember.findAll({ where: { conversation_id: req.params.id, state: 'active' }, attributes: ['user_id'] });
+    const memberUserIds = beforeMembers.map(item => Number(item.user_id));
+    await sequelize.transaction(async transaction => {
+      // 全员移出（消息历史保留但会话不再出现在任何成员的列表中）
+      await ConversationMember.update({ state: 'removed' }, { where: { conversation_id: req.params.id, state: 'active' }, transaction });
+      // 删除群资料，后续加入/查询群都会 404
+      await Group.destroy({ where: { conversation_id: req.params.id }, transaction });
+    });
+    // 用预先保存的成员列表直接推送，确保每个在线成员（含发起者）都收到解散通知
+    broadcastUsers(memberUserIds, 'conversation.dissolved', { conversation_id: Number(req.params.id) });
+    ok(res, null, '群聊已解散');
   } catch (error) { next(error); }
 });
 
@@ -319,7 +372,11 @@ app.delete('/api/groups/:id/members/:userId', requireSession, async (req, res, n
     if (target.role === 'owner') return fail(res, 409, '群主必须先转让群聊，不能直接退出或被移除');
     if (actor.role === 'admin' && target.role === 'admin') return fail(res, 403, '管理员不能移除其他管理员');
     target.state = selfLeave ? 'left' : 'removed'; await target.save();
-    broadcastConversation(req.params.id, 'member.updated', { user_id: Number(req.params.userId), state: target.state });
+    const targetUserId = Number(req.params.userId);
+    // 通知仍在群内的 active 成员
+    broadcastConversation(req.params.id, 'member.updated', { user_id: targetUserId, state: target.state });
+    // 被移除者本人（非主动退出）也要收到通知立即关闭会话，否则其前端会一直残留该群
+    if (!selfLeave) broadcastUsers([targetUserId], 'member.kicked', { conversation_id: Number(req.params.id), user_id: targetUserId, state: target.state });
     ok(res, null, selfLeave ? '已退出群聊' : '成员已移除');
   } catch (error) { next(error); }
 });
@@ -665,6 +722,16 @@ function broadcastConversation(conversationId, event, data) {
       if (socket.readyState === socket.OPEN) socket.send(JSON.stringify({ version: 1, event, data }));
     }
   }).catch(console.error);
+}
+
+// 按用户列表直接推送。
+// 用于“成员状态已变更、已不在 active 名单中但仍需收到通知”的场景（被踢、群解散等），
+// 因为 broadcastConversation 只发给 state='active' 的成员，无法覆盖到他们。
+function broadcastUsers(userIds, event, data) {
+  const targets = new Set((userIds || []).filter(Boolean).map(Number));
+  for (const userId of targets) for (const socket of socketsByUser.get(userId) || []) {
+    if (socket.readyState === socket.OPEN) socket.send(JSON.stringify({ version: 1, event, data }));
+  }
 }
 
 server.on('upgrade', async (req, socket, head) => {

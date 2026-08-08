@@ -28,6 +28,7 @@
                       <el-dropdown-item command="manage" v-if="capabilities.length">管理工作室</el-dropdown-item>
                       <el-dropdown-item command="edit" v-if="userRole === 'owner'">编辑信息</el-dropdown-item>
                       <el-dropdown-item command="submit">投稿作品</el-dropdown-item>
+                      <el-dropdown-item command="im_group" divided v-if="studio.im_group_id">加入工作室群聊</el-dropdown-item>
                       <el-dropdown-item command="leave" divided v-if="userRole !== 'owner'">退出工作室</el-dropdown-item>
                       <el-dropdown-item command="dissolve" divided v-if="userRole === 'owner'">解散工作室</el-dropdown-item>
                     </el-dropdown-menu>
@@ -122,6 +123,17 @@
                 </div>
               </div>
             </div>
+          </div>
+        </el-tab-pane>
+
+        <el-tab-pane v-if="studio?.is_public || userMemberStatus === 'active'" label="公告" name="announcements">
+          <div class="r-studio-detail--feed">
+            <div v-for="item in announcements" :key="item.id" class="r-studio-detail--feed_item">
+              <div><b>{{ item.title }}</b><el-tag v-if="item.is_pinned" size="small" type="warning">置顶</el-tag></div>
+              <p>{{ item.content }}</p>
+              <small>{{ item.author?.nickname || '工作室' }} · {{ formatDate(item.published_at) }}</small>
+            </div>
+            <el-empty v-if="!announcements.length" description="当前没有公告" />
           </div>
         </el-tab-pane>
       </el-tabs>
@@ -250,11 +262,11 @@
           <el-table :data="invites" size="small"><el-table-column prop="code" label="邀请码" min-width="230" /><el-table-column label="使用" width="90"><template #default="{ row }">{{ row.used_count }}/{{ row.max_uses }}</template></el-table-column><el-table-column prop="status" label="状态" width="100" /><el-table-column label="操作" width="100"><template #default="{ row }"><el-button v-if="row.status === 'active'" size="small" type="danger" plain @click="handleRevokeInvite(row)">撤销</el-button></template></el-table-column></el-table>
         </el-tab-pane>
         <el-tab-pane label="公告" v-if="can('announcement_manage')">
-          <div class="r-studio-detail--manage_explainer"><div><h4>当前公告</h4><p>公告会展示给所有访问工作室的人。</p></div><el-button type="primary" @click="announcementCreateVisible=true">＋ 新增公告</el-button></div>
-          <div class="r-studio-detail--feed"><div v-for="item in announcements" :key="item.id" class="r-studio-detail--feed_item"><div><b>{{ item.title }}</b><el-tag v-if="item.is_pinned" size="small" type="warning">置顶</el-tag></div><p>{{ item.content }}</p><small>{{ item.author?.nickname || '工作室' }} · {{ formatDate(item.published_at) }}</small></div><el-empty v-if="!announcements.length" description="当前没有公告" /></div>
+          <div class="r-studio-detail--manage_explainer"><div><h4>当前公告</h4><p>公告会展示给所有访问工作室的人。</p></div><el-button type="primary" @click="openAnnouncementCreate()">＋ 新增公告</el-button></div>
+          <div class="r-studio-detail--feed"><div v-for="item in announcements" :key="item.id" class="r-studio-detail--feed_item"><div><b>{{ item.title }}</b><el-tag v-if="item.is_pinned" size="small" type="warning">置顶</el-tag><span class="r-studio-detail--feed_actions"><el-button size="small" text type="primary" @click="openAnnouncementEdit(item)">编辑</el-button><el-button size="small" text type="danger" @click="handleDeleteAnnouncement(item)">删除</el-button></span></div><p>{{ item.content }}</p><small>{{ item.author?.nickname || '工作室' }} · {{ formatDate(item.published_at) }}</small></div><el-empty v-if="!announcements.length" description="当前没有公告" /></div>
         </el-tab-pane>
         <el-tab-pane label="设置" v-if="can('profile_edit')">
-          <el-form label-width="120px"><el-form-item label="人数上限"><el-input-number v-model="settingsForm.member_limit" :min="studio?.member_count || 1" :max="1000" /></el-form-item><el-form-item label="招募状态"><el-radio-group v-model="settingsForm.recruitment_status"><el-radio label="open">开放</el-radio><el-radio label="paused">暂停</el-radio></el-radio-group></el-form-item><el-form-item label="退出作品规则"><el-tag type="danger">成员退出或被移除时，强制清除其全部工作室作品</el-tag></el-form-item><el-form-item label="重申冷却（天）"><el-input-number v-model="settingsForm.application_cooldown_days" :min="0" :max="90" /></el-form-item><el-form-item label="招募问题"><el-input v-model="settingsForm.questions_text" type="textarea" :rows="4" placeholder="每行一个问题，最多 5 个" /></el-form-item><el-form-item v-if="can('im_bind')" label="IM 群 ID"><el-input v-model="settingsForm.im_group_id" maxlength="100" placeholder="绑定编程狗 IM 群聊 ID" /></el-form-item><el-form-item><el-button type="primary" @click="handleSaveSettings">保存设置</el-button></el-form-item></el-form>
+          <el-form label-width="120px"><el-form-item label="人数上限"><el-input-number v-model="settingsForm.member_limit" :min="studio?.member_count || 1" :max="1000" /></el-form-item><el-form-item label="招募状态"><el-radio-group v-model="settingsForm.recruitment_status"><el-radio label="open">开放</el-radio><el-radio label="paused">暂停</el-radio></el-radio-group></el-form-item><el-form-item label="退出作品规则"><el-tag type="danger">成员退出或被移除时，强制清除其全部工作室作品</el-tag></el-form-item><el-form-item label="重申冷却（天）"><el-input-number v-model="settingsForm.application_cooldown_days" :min="0" :max="90" /></el-form-item><el-form-item label="招募问题"><el-input v-model="settingsForm.questions_text" type="textarea" :rows="4" placeholder="每行一个问题，最多 5 个" /></el-form-item><el-form-item v-if="can('im_bind')" label="IM 群 ID"><el-input v-model="settingsForm.im_group_id" maxlength="100" placeholder="绑定编程狗 IM 群聊 ID（纯数字）" /><div class="r-studio-detail--hint">在 IM 中创建群聊后，群号会显示在群聊搜索结果或管理后台；填写后成员可通过"工作室操作 → 加入工作室群聊"一键入群</div></el-form-item><el-form-item><el-button type="primary" @click="handleSaveSettings">保存设置</el-button></el-form-item></el-form>
         </el-tab-pane>
         <el-tab-pane label="成员黑名单" v-if="can('member_manage')">
           <div class="r-studio-detail--manage_explainer"><div><h4>成员黑名单</h4><p>黑名单用户不能申请或通过邀请加入工作室。审核申请时可直接“拒绝并拉黑”；本页用于查看、解除，也可手动添加。</p></div><el-button type="danger" @click="blacklistCreateVisible=true">＋ 手动添加</el-button></div>
@@ -288,9 +300,9 @@
       <template #footer><el-button @click="inviteCreateVisible=false">取消</el-button><el-button type="primary" @click="handleCreateInvite">创建邀请</el-button></template>
     </el-dialog>
 
-    <el-dialog v-model="announcementCreateVisible" title="新增工作室公告" width="620px" :close-on-click-modal="false">
-      <el-form label-position="top"><el-form-item label="公告标题"><el-input v-model="announcementForm.title" maxlength="120" show-word-limit /></el-form-item><el-form-item label="公告内容"><el-input v-model="announcementForm.content" type="textarea" :rows="7" maxlength="10000" show-word-limit /></el-form-item></el-form>
-      <template #footer><el-button @click="announcementCreateVisible=false">取消</el-button><el-button type="primary" @click="handleCreateAnnouncement">发布公告</el-button></template>
+    <el-dialog v-model="announcementCreateVisible" :title="announcementForm.id ? '编辑工作室公告' : '新增工作室公告'" width="620px" :close-on-click-modal="false">
+      <el-form label-position="top"><el-form-item label="公告标题"><el-input v-model="announcementForm.title" maxlength="120" show-word-limit /></el-form-item><el-form-item label="公告内容"><el-input v-model="announcementForm.content" type="textarea" :rows="7" maxlength="10000" show-word-limit /></el-form-item><el-form-item label="置顶"><el-switch v-model="announcementForm.is_pinned" /></el-form-item></el-form>
+      <template #footer><el-button @click="announcementCreateVisible=false">取消</el-button><el-button type="primary" @click="handleSaveAnnouncement">{{ announcementForm.id ? '保存修改' : '发布公告' }}</el-button></template>
     </el-dialog>
 
     <el-dialog v-model="blacklistCreateVisible" title="手动加入黑名单" width="520px" :close-on-click-modal="false">
@@ -326,6 +338,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { studioApi } from '@/api/studio'
 import { workApi } from '@/api/work'
+import { imApi } from '@/api/im'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import GeetestDialog from '@/components/GeetestDialog.vue'
 import { useGeetestConfig } from '@/composables/useGeetestConfig'
@@ -397,7 +410,7 @@ const analytics = ref(null)
 const blacklist = ref([])
 const blacklistForm = reactive({ user_id: null, reason: '' })
 const inviteForm = reactive({ max_uses: 1, expires_in_hours: 72 })
-const announcementForm = reactive({ title: '', content: '' })
+const announcementForm = reactive({ id: null, title: '', content: '', is_pinned: false })
 const settingsForm = reactive({ member_limit: 100, recruitment_status: 'open', application_cooldown_days: 7, questions_text: '', im_group_id: '' })
 const transferForm = reactive({ target_user_id: null, reason: '', confirm_name: '' })
 const permissionDialogVisible = ref(false)
@@ -516,7 +529,15 @@ const fetchStudio = async () => {
       if (userMemberStatus.value === 'active') {
         studioApi.getCapabilities(route.params.id).then(result => { if (result.code === 200) capabilities.value = result.data.permissions || [] }).catch(() => {})
       } else capabilities.value = []
-      studioApi.getAnnouncements(route.params.id).then(result => { if (result.code === 200) announcements.value = result.data || [] }).catch(() => {})
+      // 公告仅对公开工作室访问者与活跃成员可见；接口报错时明确提示，不再静默吞错
+      if (studio.value?.is_public || userMemberStatus.value === 'active') {
+        studioApi.getAnnouncements(route.params.id).then(result => {
+          if (result.code === 200) announcements.value = result.data || []
+          else { announcements.value = []; ElMessage.error(result.msg || '加载公告失败') }
+        }).catch(() => { announcements.value = []; ElMessage.error('加载公告失败，请稍后重试') })
+      } else {
+        announcements.value = []
+      }
     } else {
       ElMessage.error(res.msg || '获取工作室失败')
     }
@@ -532,6 +553,7 @@ const resetState = () => {
   members.value = []
   works.value = []
   worksTotal.value = 0
+  announcements.value = [] // 公告请求是异步的，切换工作室时必须清空，防止残留上一工作室公告
   userRole.value = null
   userMemberStatus.value = null
   activeTab.value = 'works'
@@ -700,9 +722,46 @@ const handleRevokeInvite = async row => {
   const geetestData = await verifyScene('studio_management'); if (!geetestData) return
   try { const res = await studioApi.revokeInvite(route.params.id, row.id, geetestData); if (res.code === 200) { ElMessage.success('邀请已撤销'); await showManageDialog() } } catch (e) { ElMessage.error(e.response?.data?.msg || '撤销失败') }
 }
-const handleCreateAnnouncement = async () => {
+// 打开新增公告对话框（清空表单）
+const openAnnouncementCreate = () => {
+  Object.assign(announcementForm, { id: null, title: '', content: '', is_pinned: false })
+  announcementCreateVisible.value = true
+}
+// 打开编辑公告对话框（填充表单）
+const openAnnouncementEdit = (item) => {
+  Object.assign(announcementForm, { id: item.id, title: item.title, content: item.content, is_pinned: !!item.is_pinned })
+  announcementCreateVisible.value = true
+}
+// 新增或更新公告
+const handleSaveAnnouncement = async () => {
   const geetestData = await verifyScene('studio_management'); if (!geetestData) return
-  try { const res = await studioApi.createAnnouncement(route.params.id, { ...announcementForm, ...geetestData }); if (res.code === 200) { ElMessage.success('公告已发布'); announcementForm.title = ''; announcementForm.content = ''; announcementCreateVisible.value = false; const refreshed = await studioApi.getAnnouncements(route.params.id); if (refreshed.code === 200) announcements.value = refreshed.data || [] } } catch (e) { ElMessage.error(e.response?.data?.msg || '发布失败') }
+  try {
+    const payload = { ...announcementForm, ...geetestData }
+    let res
+    if (announcementForm.id) res = await studioApi.updateAnnouncement(route.params.id, announcementForm.id, payload)
+    else res = await studioApi.createAnnouncement(route.params.id, payload)
+    if (res.code === 200) {
+      ElMessage.success(announcementForm.id ? '公告已更新' : '公告已发布')
+      announcementCreateVisible.value = false
+      const refreshed = await studioApi.getAnnouncements(route.params.id)
+      if (refreshed.code === 200) announcements.value = refreshed.data || []
+    }
+  } catch (e) { ElMessage.error(e.response?.data?.msg || (announcementForm.id ? '更新失败' : '发布失败')) }
+}
+// 删除公告
+const handleDeleteAnnouncement = async (item) => {
+  try {
+    await ElMessageBox.confirm(`确定删除公告「${item.title}」吗？此操作不可恢复。`, '删除公告', { type: 'warning', confirmButtonText: '确认删除' })
+  } catch { return }
+  const geetestData = await verifyScene('studio_management'); if (!geetestData) return
+  try {
+    const res = await studioApi.deleteAnnouncement(route.params.id, item.id, geetestData)
+    if (res.code === 200) {
+      ElMessage.success('公告已删除')
+      const refreshed = await studioApi.getAnnouncements(route.params.id)
+      if (refreshed.code === 200) announcements.value = refreshed.data || []
+    }
+  } catch (e) { ElMessage.error(e.response?.data?.msg || '删除失败') }
 }
 const handleSaveSettings = async () => {
   const geetestData = await verifyScene('studio_management'); if (!geetestData) return
@@ -747,8 +806,46 @@ const handleCommand = (command) => {
     case 'manage': showManageDialog(); break
     case 'edit': showEditDialog(); break
     case 'submit': showSubmitWorkDialog(); break
+    case 'im_group': handleEnterImGroup(); break
     case 'leave': handleLeave(); break
     case 'dissolve': handleDissolve(); break
+  }
+}
+
+// 校验外部链接：仅允许 http/https，且若后端返回 IM origin 则严格限制到该域名，防 open redirect / 钓鱼跳转
+const getSafeExternalUrl = (value, expectedOrigin = '') => {
+  if (!value) return ''
+  try {
+    const url = new URL(String(value))
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return ''
+    if (expectedOrigin && url.origin !== String(expectedOrigin)) return ''
+    return url.href
+  } catch { return '' }
+}
+
+// 跳转到 IM 并自动加入工作室绑定的群聊
+// 后端 createImSsoTicket 已支持 action=group + group_id,
+// IM web 端 load() 收到 intent.action==='group' 会自动 POST /groups/:id/join
+// 先 window.open('about:blank') 保留用户点击产生的 popup 手势，避免 Safari/严格弹窗设置拦截
+const handleEnterImGroup = async () => {
+  const groupId = Number(studio.value?.im_group_id)
+  if (!Number.isInteger(groupId) || groupId <= 0) {
+    ElMessage.warning('该工作室尚未绑定 IM 群聊，请联系室长在设置中填写群聊 ID')
+    return
+  }
+  const popup = window.open('about:blank', '_blank')
+  try {
+    const res = await imApi.createSsoTicket({ action: 'group', group_id: groupId })
+    // 白名单：只允许跳转到后端返回的 IM 自身域名
+    const safeUrl = getSafeExternalUrl(res.data?.url, res.data?.origin)
+    if (res.code !== 200 || !safeUrl) throw new Error(res.msg || '无法进入即时通讯，请确认 IM 系统已启用')
+    if (popup) {
+      popup.opener = null // 防 tabnabbing：新窗口禁止通过 window.opener 访问本页面
+      popup.location.href = safeUrl
+    } else window.open(safeUrl, '_blank', 'noopener,noreferrer')
+  } catch (e) {
+    popup?.close()
+    ElMessage.error(e.response?.data?.msg || e.message || '进入即时通讯失败')
   }
 }
 
@@ -883,12 +980,14 @@ $border-color: #eee;
 .r-studio-detail--feed { display: grid; gap: 12px; }
 .r-studio-detail--feed_item { padding: 16px; border: 1px solid rgba(254,196,51,.32); border-radius: 14px; background: rgba(255,255,255,.86); }
 .r-studio-detail--feed_item > div { display: flex; align-items: center; gap: 8px; }
+.r-studio-detail--feed_actions { margin-left: auto; display: inline-flex; gap: 2px; }
 .r-studio-detail--feed_item p { white-space: pre-wrap; color: #505a6b; }
 .r-studio-detail--feed_item small { color: #8b95a7; }
 .r-studio-detail--permission_grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .r-studio-detail--manage_explainer { display:flex; align-items:center; justify-content:space-between; gap:20px; padding:16px; margin-bottom:14px; border:1px solid #f0dfb4; border-radius:14px; background:linear-gradient(135deg,#fffaf0,#fff); }
 .r-studio-detail--manage_explainer h4,.r-studio-detail--manage_explainer p { margin:0; }
 .r-studio-detail--manage_explainer p { margin-top:5px; color:#7d8797; line-height:1.6; }
+.r-studio-detail--hint { margin-top:6px; color:#98a2b3; font-size:12px; line-height:1.6; }
 .r-studio-detail--role_button { border:0; font-weight:700; }
 .r-studio-detail--role_button.role-member { background:#eef2f6; color:#475467; }
 .r-studio-detail--role_button.role-admin { background:#fff0c2; color:#a15c00; }

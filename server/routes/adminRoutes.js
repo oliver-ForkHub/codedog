@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 后台管理路由
  */
 
@@ -83,6 +83,8 @@ router.delete('/comments/:commentId', requireScopedCommentPermission('comment:de
  * 帖子管理
  */
 router.get('/posts', requireRole('moderator'), requirePermission('post:review'), adminController.getPosts);
+router.get('/posts/pending-review', requireRole('moderator'), requirePermission('post:review'), adminController.getPendingReviewPosts);
+router.post('/posts/:postId/review', requireRole('moderator'), requirePermission('post:review'), adminController.reviewPendingPost);
 router.get('/forum/overview', requireRole('moderator'), requirePermission('post:review'), adminController.getForumOverview);
 router.get('/forum/attention-settings', requireRole('admin'), adminController.getForumAttentionSettings);
 router.put('/forum/attention-settings', requireRole('admin'), adminController.updateForumAttentionSettings);

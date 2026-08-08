@@ -41,6 +41,8 @@ router.delete('/:id/invites/:inviteId', authMiddleware, geetestVerify('studio_ma
 router.post('/invites/accept', authMiddleware, geetestVerify('studio_management'), managementController.acceptInvite);
 router.get('/:id/logs', authMiddleware, managementController.listLogs);
 router.post('/:id/announcements', authMiddleware, geetestVerify('studio_management'), managementController.createAnnouncement);
+router.put('/:id/announcements/:announcementId', authMiddleware, geetestVerify('studio_management'), managementController.updateAnnouncement);
+router.delete('/:id/announcements/:announcementId', authMiddleware, geetestVerify('studio_management'), managementController.deleteAnnouncement);
 router.put('/:id/settings', authMiddleware, geetestVerify('studio_management'), managementController.updateSettings);
 router.get('/:id/analytics', authMiddleware, managementController.getAnalytics);
 router.get('/:id/blacklist', authMiddleware, managementController.listBlacklist);

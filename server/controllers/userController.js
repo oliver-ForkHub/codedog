@@ -736,7 +736,10 @@ async function createImSsoTicket(req, res) {
         }
         const ticket = createImTicket(user, { peer, req });
         params.set('ticket', ticket);
-        return successResponse(res, { url: `${publicUrl}/sso?${params.toString()}` }, '正在进入即时通讯');
+        // origin 用于前端导航白名单校验：只允许跳转到 IM 自身域名，防 open redirect
+        let origin = '';
+        try { origin = new URL(publicUrl).origin; } catch { origin = ''; }
+        return successResponse(res, { url: `${publicUrl}/sso?${params.toString()}`, origin }, '正在进入即时通讯');
     } catch (error) {
         console.error('创建 IM SSO Ticket 失败:', error.message);
         return errorResponse(res, error.message || '即时通讯登录失败', error.statusCode || 500);

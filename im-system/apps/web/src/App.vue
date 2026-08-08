@@ -35,7 +35,7 @@
     </aside>
 
     <section class="channel">
-      <header><button class="mobile-back" type="button" aria-label="返回会话列表" @click="mobileChannelOpen = false">‹</button><div><small>即时消息</small><h1>{{ selected ? (selected.title || `会话 #${selected.id}`) : '选择一个会话' }}</h1></div><div class="signal"><span></span><span></span><span></span></div></header>
+      <header><button class="mobile-back" type="button" aria-label="返回会话列表" @click="mobileChannelOpen = false">‹</button><div><small>即时消息</small><h1>{{ selected ? (selected.title || `会话 #${selected.id}`) : '选择一个会话' }}</h1><button v-if="selected?.type === 'group'" type="button" class="group-info-link" @click="openGroupManage">群号 {{ selected.group?.conversation_id }} · 群管理 ›</button></div><div class="signal"><span></span><span></span><span></span></div></header>
       <div ref="timeline" class="timeline">
         <div v-if="loading" class="center-state">正在加载消息…</div>
         <div v-else-if="initialLoginError" class="welcome auth-failure"><div class="orb">!</div><h2>无法完成安全登录</h2><p>{{ initialLoginError }}</p><div v-if="initialLoginDiagnostic" class="auth-diagnostic"><b>诊断编号 {{ initialLoginDiagnostic.diagnostic_id }}</b><span>网络地址：{{ initialLoginDiagnostic.ip_match ? '一致' : '不一致' }}</span><span>浏览器标识：{{ initialLoginDiagnostic.browser_match ? '一致' : '不一致' }}</span><small>将诊断编号提供给管理员，可在 IM 服务日志中查找对应记录。</small></div><a class="reauth-button" :href="communityUrl">返回编程狗重新进入</a></div>
@@ -114,6 +114,46 @@
         <footer><button class="ghost" @click="groupWizard.step === 1 ? closeGroupWizard() : groupWizard.step--">{{ groupWizard.step === 1 ? '取消' : '上一步' }}</button><button :disabled="groupWizard.submitting || (groupWizard.step === 1 && !groupWizard.name.trim())" @click="nextGroupStep">{{ groupWizard.step === 3 ? (groupWizard.submitting ? '创建中' : '确认创建') : '下一步' }}</button></footer>
       </section>
     </div>
+    <div v-if="groupManage.open" class="modal-mask" @click.self="closeGroupManage">
+      <section class="im-dialog group-manage" role="dialog" aria-modal="true" aria-labelledby="group-manage-title">
+        <header><div><small>群聊管理</small><h2 id="group-manage-title">{{ groupManage.data?.name || selected?.title }}</h2></div><button aria-label="关闭" @click="closeGroupManage">×</button></header>
+        <p class="group-manage-meta">群号 {{ groupManage.data?.conversation_id }} · {{ groupManage.data?.member_count }} 人 · 我的身份：{{ roleText(groupManage.data?.my_role) }}</p>
+        <form v-if="isGroupManager" class="dialog-search group-rename" @submit.prevent="renameGroup">
+          <span>改</span><input v-model="groupManage.rename" maxlength="50" placeholder="修改群名称" /><button :disabled="groupManage.submitting || !groupManage.rename.trim()">保存</button>
+        </form>
+        <div v-if="isGroupManager" class="group-invite">
+          <small>邀请成员（按昵称 / 用户名 / 编程猫 ID 搜索）</small>
+          <form class="dialog-search" @submit.prevent="searchGroupMembers"><span>⌕</span><input v-model="groupManage.keyword" maxlength="50" placeholder="搜索用户加入群聊" /><button :disabled="groupManage.searching">{{ groupManage.searching ? '搜索中' : '搜索' }}</button></form>
+          <div v-if="groupManage.results.length" class="invite-results">
+            <article v-for="user in groupManage.results" :key="user.id">
+              <span class="avatar"><img v-if="user.avatar" :src="user.avatar" alt="" referrerpolicy="no-referrer" />{{ avatarLetter(user) }}</span>
+              <div><b>{{ displayName(user, user.id) }}</b><small>@{{ user.username }}</small></div>
+              <button @click="inviteGroupMember(user)">邀请</button>
+            </article>
+          </div>
+        </div>
+        <div class="member-list">
+          <div v-if="groupManage.loading" class="dialog-empty">正在加载成员…</div>
+          <template v-else>
+            <article v-for="member in groupManage.data?.members || []" :key="member.user_id" class="member-row">
+              <span class="avatar"><img v-if="member.user?.avatar" :src="member.user.avatar" alt="" referrerpolicy="no-referrer" />{{ Number(member.user_id) === Number(me?.id) ? initials : avatarLetter(member.user, '员') }}</span>
+              <div class="member-main"><b>{{ Number(member.user_id) === Number(me?.id) ? '我' : displayName(member.user, member.user_id) }}</b><small>{{ roleText(member.role) }}</small></div>
+              <div class="member-actions">
+                <button v-if="canSetAdmin(member)" @click="setGroupAdmin(member, member.role === 'member' ? 'admin' : 'member')">{{ member.role === 'member' ? '设管理员' : '取消管理员' }}</button>
+                <button v-if="canTransfer(member)" @click="transferGroup(member)">转让群主</button>
+                <button v-if="canKick(member)" class="danger" @click="kickMember(member)">移除</button>
+              </div>
+            </article>
+            <div v-if="!groupManage.data?.members?.length" class="dialog-empty">没有成员</div>
+          </template>
+        </div>
+        <div v-if="groupManage.error" class="dialog-error">{{ groupManage.error }}</div>
+        <footer>
+          <button class="ghost danger" :disabled="groupManage.submitting" @click="leaveGroup">退出群聊</button>
+          <button v-if="isGroupOwner" class="danger" :disabled="groupManage.submitting" @click="dissolveGroup">解散群聊</button>
+        </footer>
+      </section>
+    </div>
     <div v-if="reportDialog.open" class="modal-mask" @click.self="closeReport">
       <section class="report-dialog" role="dialog" aria-modal="true" aria-labelledby="report-title">
         <header><div><small>内容安全</small><h2 id="report-title">举报这条消息</h2></div><button aria-label="关闭" @click="closeReport">×</button></header>
@@ -159,6 +199,7 @@ const groupWizard = reactive({ open: false, step: 1, name: '', keyword: '', resu
 const groupStepTitle = computed(() => ['设置群资料', '邀请初始成员', '确认创建群聊'][groupWizard.step - 1])
 const captchaDialog = reactive({ open: false, scene: '', error: '', resolve: null })
 const captchaGrants = new Map()
+const groupManage = reactive({ open: false, loading: false, data: null, rename: '', keyword: '', results: [], searching: false, submitting: false, error: '' })
 const reportDialog = reactive({ open: false, message: null, reason: '', error: '', submitting: false })
 const toast = reactive({ message: '', type: 'success' })
 const readSequences = reactive({})
@@ -347,6 +388,108 @@ const nextGroupStep = () => {
   else createGroupFromWizard()
 }
 const handleRequest = async (request, action) => { await api(`/conversation-requests/${request.conversation_id}`, { method:'POST', body:JSON.stringify({ action }) }); await refreshSidebar() }
+const roleText = role => ({ owner: '群主', admin: '管理员', member: '成员' }[role] || role || '成员')
+const isGroupOwner = computed(() => groupManage.data?.my_role === 'owner')
+const isGroupManager = computed(() => ['owner', 'admin'].includes(groupManage.data?.my_role))
+const openGroupManage = async () => {
+  if (selected.value?.type !== 'group') return
+  groupManage.open = true; groupManage.error = ''
+  await refreshGroupManage()
+}
+const closeGroupManage = () => { if (!groupManage.submitting) groupManage.open = false }
+const refreshGroupManage = async () => {
+  groupManage.loading = true; groupManage.error = ''
+  try {
+    groupManage.data = await api(`/groups/${selected.value.id}`)
+    groupManage.results = []; groupManage.keyword = ''; groupManage.rename = ''
+  } catch (error) { groupManage.data = null; groupManage.error = error.message }
+  finally { groupManage.loading = false }
+}
+const canSetAdmin = member => isGroupOwner.value && member.role !== 'owner' && Number(member.user_id) !== Number(me.value?.id)
+const canTransfer = member => isGroupOwner.value && member.role !== 'owner' && Number(member.user_id) !== Number(me.value?.id)
+const canKick = member => {
+  if (Number(member.user_id) === Number(me.value?.id)) return false
+  if (member.role === 'owner') return false
+  if (isGroupOwner.value) return true
+  return isGroupManager.value && member.role !== 'admin'
+}
+const renameGroup = async () => {
+  const name = groupManage.rename.trim(); if (!name || groupManage.submitting) return
+  groupManage.submitting = true; groupManage.error = ''
+  try {
+    await api(`/groups/${selected.value.id}`, { method: 'PATCH', body: JSON.stringify({ name }) })
+    showToast('群名称已更新')
+    await Promise.all([refreshGroupManage(), refreshSidebar()])
+  } catch (error) { groupManage.error = error.message } finally { groupManage.submitting = false }
+}
+const searchGroupMembers = async () => {
+  const keyword = groupManage.keyword.trim(); if (!keyword || groupManage.searching) return
+  groupManage.searching = true; groupManage.error = ''
+  try {
+    const captchaGrant = await getCaptchaGrant('im_search')
+    const data = await api('/search', { method: 'POST', captchaGrant, body: JSON.stringify({ keyword }) })
+    const existingIds = new Set((groupManage.data?.members || []).map(member => Number(member.user_id)))
+    groupManage.results = (data.users || []).filter(user => !existingIds.has(Number(user.id)))
+  } catch (error) { groupManage.error = error.message } finally { groupManage.searching = false }
+}
+const inviteGroupMember = async user => {
+  if (groupManage.submitting) return
+  groupManage.submitting = true; groupManage.error = ''
+  try {
+    await api(`/groups/${selected.value.id}/members`, { method: 'POST', body: JSON.stringify({ user_id: Number(user.id) }) })
+    showToast(`已邀请 ${displayName(user, user.id)}`)
+    await refreshGroupManage()
+  } catch (error) { groupManage.error = error.message } finally { groupManage.submitting = false }
+}
+const setGroupAdmin = async (member, role) => {
+  groupManage.error = ''
+  try {
+    await api(`/groups/${selected.value.id}/members/${member.user_id}`, { method: 'PATCH', body: JSON.stringify({ role }) })
+    showToast(role === 'admin' ? `已将 ${displayName(member.user, member.user_id)} 设为管理员` : '已取消管理员')
+    await refreshGroupManage()
+  } catch (error) { groupManage.error = error.message }
+}
+const kickMember = async member => {
+  if (!window.confirm(`确定将 ${displayName(member.user, member.user_id)} 移出群聊吗？`)) return
+  groupManage.error = ''
+  try {
+    await api(`/groups/${selected.value.id}/members/${member.user_id}`, { method: 'DELETE' })
+    showToast('成员已移除')
+    await refreshGroupManage()
+  } catch (error) { groupManage.error = error.message }
+}
+const transferGroup = async member => {
+  if (!window.confirm(`确定将群主转让给 ${displayName(member.user, member.user_id)} 吗？转让后你将降为管理员。`)) return
+  groupManage.submitting = true; groupManage.error = ''
+  try {
+    await api(`/groups/${selected.value.id}/transfer`, { method: 'POST', body: JSON.stringify({ user_id: Number(member.user_id) }) })
+    showToast('群主已转让')
+    await refreshGroupManage()
+  } catch (error) { groupManage.error = error.message } finally { groupManage.submitting = false }
+}
+const leaveGroup = async () => {
+  if (!window.confirm('确定退出该群聊吗？')) return
+  groupManage.submitting = true; groupManage.error = ''
+  try {
+    await api(`/groups/${selected.value.id}/members/${me.value.id}`, { method: 'DELETE' })
+    groupManage.open = false
+    selected.value = null; messages.value = []
+    await refreshSidebar(); showToast('已退出群聊')
+  } catch (error) { groupManage.error = error.message } finally { groupManage.submitting = false }
+}
+const dissolveGroup = async () => {
+  const name = groupManage.data?.name || ''
+  const typed = window.prompt(`解散后所有成员都会被移出且无法重新加入。如确认，请输入群名称「${name}」：`, '')
+  if (typed === null) return
+  if (typed.trim() !== name) { groupManage.error = '群名称输入不一致，已取消解散'; return }
+  groupManage.submitting = true; groupManage.error = ''
+  try {
+    await api(`/groups/${selected.value.id}/dissolve`, { method: 'POST' })
+    groupManage.open = false
+    selected.value = null; messages.value = []
+    await refreshSidebar(); showToast('群聊已解散', 'warning')
+  } catch (error) { groupManage.error = error.message } finally { groupManage.submitting = false }
+}
 const selectConversation = async item => { selected.value = item; mobileChannelOpen.value = true; loading.value = true; markConversationRead(item); try { messages.value = await api(`/conversations/${item.id}/messages`); await nextTick(); timeline.value?.scrollTo(0, timeline.value.scrollHeight) } finally { loading.value = false } }
 const sendMessage = async () => {
   if (!selected.value || !draft.value.trim() || sending.value) return
@@ -382,23 +525,66 @@ const connectSocket = () => {
   }
   socket.onmessage = async event => {
     const frame = JSON.parse(event.data)
-    if (frame.event !== 'message.new') return
-    const conversationId = Number(frame.data.conversation_id)
-    let item = conversations.value.find(value => Number(value.id) === conversationId)
-    if (!item) {
+    if (frame.event === 'message.new') {
+      const conversationId = Number(frame.data.conversation_id)
+      let item = conversations.value.find(value => Number(value.id) === conversationId)
+      if (!item) {
+        await refreshSidebar()
+        item = conversations.value.find(value => Number(value.id) === conversationId)
+      }
+      if (item) {
+        item.last_sequence = Math.max(Number(item.last_sequence) || 0, Number(frame.data.sequence) || 0)
+        item.latest_message = frame.data
+        conversations.value = [...conversations.value].sort((a, b) => new Date(b.latest_message?.created_at || b.updated_at || 0) - new Date(a.latest_message?.created_at || a.updated_at || 0))
+      }
+      if (conversationId === Number(selected.value?.id)) {
+        if (!messages.value.some(value => String(value.id) === String(frame.data.id))) messages.value.push(frame.data)
+        markConversationRead(item)
+        await nextTick()
+        timeline.value?.scrollTo(0, timeline.value.scrollHeight)
+      }
+      return
+    }
+    // 群聊被解散：关闭当前会话并刷新列表
+    if (frame.event === 'conversation.dissolved') {
+      const conversationId = Number(frame.data.conversation_id)
+      if (Number(selected.value?.id) === conversationId) { selected.value = null; messages.value = [] }
+      if (groupManage.open && Number(groupManage.data?.conversation_id) === conversationId) { groupManage.open = false; groupManage.data = null }
       await refreshSidebar()
-      item = conversations.value.find(value => Number(value.id) === conversationId)
+      showToast('群聊已解散', 'warning')
+      return
     }
-    if (item) {
-      item.last_sequence = Math.max(Number(item.last_sequence) || 0, Number(frame.data.sequence) || 0)
-      item.latest_message = frame.data
-      conversations.value = [...conversations.value].sort((a, b) => new Date(b.latest_message?.created_at || b.updated_at || 0) - new Date(a.latest_message?.created_at || a.updated_at || 0))
+    // 群资料更新（群名等）：同步会话标题与群管理面板
+    if (frame.event === 'conversation.updated') {
+      const conversationId = Number(frame.data.conversation_id)
+      const item = conversations.value.find(value => Number(value.id) === conversationId)
+      if (item) { item.group = frame.data; item.title = frame.data.name }
+      if (groupManage.open && Number(groupManage.data?.conversation_id) === conversationId) groupManage.data = { ...groupManage.data, ...frame.data }
+      return
     }
-    if (conversationId === Number(selected.value?.id)) {
-      if (!messages.value.some(value => String(value.id) === String(frame.data.id))) messages.value.push(frame.data)
-      markConversationRead(item)
-      await nextTick()
-      timeline.value?.scrollTo(0, timeline.value.scrollHeight)
+    // 成员变动（加入/移除/角色变更）
+    if (frame.event === 'member.updated') {
+      const conversationId = Number(frame.data.conversation_id)
+      // 兜底：若自己因其他端操作（如被管理员移除后重新同步）变成 removed/left，立即关闭会话
+      if (['removed', 'left'].includes(frame.data.state) && Number(frame.data.user_id) === Number(me.value?.id)) {
+        if (Number(selected.value?.id) === conversationId) { selected.value = null; messages.value = [] }
+        if (groupManage.open && Number(groupManage.data?.conversation_id) === conversationId) { groupManage.open = false; groupManage.data = null }
+        await refreshSidebar()
+        showToast('你已退出该群聊', 'warning')
+        return
+      }
+      if (groupManage.open) await refreshGroupManage()
+      return
+    }
+    // 自己被移出群聊（后端在成员状态变更前保存了目标用户并单独推送）：立即关闭会话
+    if (frame.event === 'member.kicked') {
+      const conversationId = Number(frame.data.conversation_id)
+      if (Number(frame.data.user_id) === Number(me.value?.id)) {
+        if (Number(selected.value?.id) === conversationId) { selected.value = null; messages.value = [] }
+        if (groupManage.open && Number(groupManage.data?.conversation_id) === conversationId) { groupManage.open = false; groupManage.data = null }
+        await refreshSidebar()
+        showToast('你已被移出群聊', 'warning')
+      }
     }
   }
 }
@@ -491,5 +677,14 @@ onUnmounted(() => {
 .mobile-layout .timeline{min-height:0;padding:14px 12px 8px;overscroll-behavior:contain}.mobile-layout .welcome .orb{width:64px;height:64px;border-radius:19px;font-size:29px}.mobile-layout .welcome h2{font-size:20px;margin-top:16px}.mobile-layout .welcome p{padding:0 20px;font-size:13px;line-height:1.6}
 .mobile-layout .message{max-width:94%;gap:8px;margin-bottom:14px}.mobile-layout .message>.avatar{width:34px;height:34px}.mobile-layout .message-meta{gap:6px;flex-wrap:wrap}.mobile-layout .message p{margin-top:5px;padding:9px 11px;line-height:1.55}.mobile-layout .message-image{max-width:min(72vw,320px);max-height:300px}
 .mobile-layout .composer{margin:6px 8px max(8px,env(safe-area-inset-bottom));border-radius:12px}.mobile-layout .composer textarea{height:56px;padding:10px 11px;font-size:16px}.mobile-layout .composer footer{padding:6px 7px}.mobile-layout .composer footer>span{max-width:92px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.mobile-layout .image-button{min-height:40px;padding:8px 11px}.mobile-layout .composer button{min-height:40px;padding:8px 14px}
+.group-info-link{border:0;background:transparent;padding:0;margin-top:3px;color:#b47b00;font-size:11px;cursor:pointer;white-space:nowrap}.group-info-link:hover{color:#d28c00;text-decoration:underline}
+.group-manage{width:min(560px,100%)}.group-manage-meta{margin:0 26px 14px;padding:11px 14px;border-radius:10px;background:#f7f8fa;color:#5f6876;font-size:12px}
+.group-rename{margin-bottom:14px}.group-rename>span{color:#b47b00;font-weight:700}.group-rename button{height:34px;padding:0 14px;border:0;border-radius:10px;background:#fec433;color:#20242a;font-weight:800;cursor:pointer}.group-rename button:disabled{opacity:.45}
+.group-invite{margin:0 26px 16px}.group-invite>small{display:block;margin-bottom:8px;color:#9aa1ad;font-size:11px}.group-invite .dialog-search{margin:0}.invite-results{max-height:180px;overflow:auto;margin-top:8px;border:1px solid #edf0f4;border-radius:12px}.invite-results article{display:flex;align-items:center;gap:10px;padding:9px 12px}.invite-results article+article{border-top:1px solid #f0f2f5}.invite-results article>div{min-width:0;flex:1}.invite-results article b,.invite-results article small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.invite-results article b{font-size:13px}.invite-results article small{margin-top:3px;color:#9aa1ad;font-size:11px}.invite-results article>button{height:30px;padding:0 12px;border:0;border-radius:8px;background:#fff4ce;color:#9a6900;font-size:12px;font-weight:700;cursor:pointer}.invite-results article>button:hover{background:#fec433;color:#20242a}
+.member-list{min-height:120px;max-height:300px;overflow:auto;margin:0 26px;border:1px solid #edf0f4;border-radius:14px}.member-row{display:flex;align-items:center;gap:12px;padding:11px 14px}.member-row+.member-row{border-top:1px solid #f0f2f5}.member-row .avatar{flex:none;width:38px;height:38px;border-radius:50%;display:grid;place-items:center;background:#f0f2f6;color:#59657a;font-weight:800}.member-main{min-width:0;flex:1}.member-main b{display:block;color:#263044;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.member-main small{display:block;margin-top:3px;color:#989fac;font-size:11px}.member-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}.member-actions button{height:28px;padding:0 10px;border:1px solid #e3e6ec;border-radius:8px;background:#fff;color:#4a5468;font-size:11px;cursor:pointer}.member-actions button:hover{border-color:#fec433;color:#8f6500}.member-actions button.danger{color:#d04b4b}.member-actions button.danger:hover{border-color:#f3c1c1;background:#fff2f2;color:#c74343}
+.im-dialog>footer button.danger{background:#e5484d;color:#fff}.im-dialog>footer button.ghost.danger{background:#fff;border-color:#f0c0c0;color:#d04b4b}
+@media(max-width:820px), (max-device-width:820px){
+  .group-manage-meta{margin:0 18px 12px}.group-invite{margin:0 18px 14px}.member-list{margin:0 18px}
+}
 .mobile-layout .intel{display:none}.mobile-layout .modal-mask{padding:0;align-items:end}.mobile-layout .report-dialog{max-height:calc(100dvh - 24px);overflow-y:auto;padding:18px;border-radius:15px}.mobile-layout .report-dialog textarea{min-height:100px}.mobile-layout .im-dialog{width:100%;max-height:92dvh;border-radius:24px 24px 0 0}.mobile-layout .im-dialog>header{padding:20px 18px 15px}.mobile-layout .dialog-search{margin:0 18px}.mobile-layout .result-tabs{margin:14px 18px 0}.mobile-layout .directory-results{padding:10px 12px 20px}.mobile-layout .wizard-progress{padding:0 18px}.mobile-layout .wizard-page{padding:24px 18px 18px}.mobile-layout .im-dialog>footer{position:sticky;bottom:0;padding:14px 18px max(14px,env(safe-area-inset-bottom));background:#fff}.mobile-layout .toast{top:max(12px,env(safe-area-inset-top));width:calc(100% - 24px);text-align:center}
 </style>

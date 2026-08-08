@@ -14,7 +14,7 @@ const jwt = require('jsonwebtoken');
 const { JWT_SECRET, JWT_EXPIRES_IN } = require('../config/auth');
 const DbAdapter = require('../utils/dbAdapter');
 const { likeContains } = require('../utils/security');
-const { snapshotPost, recordPostRevision, recordModerationLog } = require('../services/forumHistory');
+const { snapshotPost, recordPostRevision, recordModerationLog, softDeletePost } = require('../services/forumHistory');
 const { getModeratedBoardIds, canModerateBoard } = require('../services/forumModeration');
 const { invalidateForumReputation } = require('../services/forumReputation');
 // H12: 引入内容审核服务，爬虫/管理员落库前对 nickname/bio/作品名+描述 做敏感词检查
@@ -5386,6 +5386,8 @@ module.exports = {
     deleteForumBoard,
     updatePost,
     getPosts,
+    getPendingReviewPosts,
+    reviewPendingPost,
     deletePost,
     setPostEssence,
     setPostTop,
@@ -5884,6 +5886,12 @@ async function getPosts(req, res) {
                 model: User,
                 as: 'author',
                 attributes: ['id', 'username', 'nickname', 'avatar']
+            }, {
+                model: ForumModerationLog,
+                as: 'moderation_logs',
+                required: false,
+                separate: true,
+                order: [['created_at', 'DESC']]
             }],
             order: [['is_top', 'DESC'], ['created_at', 'DESC']],
             limit: pageSize,
@@ -5894,6 +5902,178 @@ async function getPosts(req, res) {
     } catch (error) {
         console.error('获取帖子列表错误:', error);
         return errorResponse(res, '获取失败', 500);
+    }
+}
+
+/**
+ * 获取待审查帖子（命中敏感词的帖子）
+ * 查询 ForumModerationLog 中 action='sensitive_detected' 且 after_state.reviewed=false 的帖子
+ * 分区版主只能查看自己负责的板块
+ */
+async function getPendingReviewPosts(req, res) {
+    try {
+        const { page, pageSize, offset } = DbAdapter.parsePagination(req.query);
+        // 构造待审查条件：存在 sensitive_detected 且未审核的日志
+        const boardWhere = {};
+        if (req.user?.role === 'moderator') {
+            const boardIds = await getModeratedBoardIds(req.user);
+            boardWhere.board_id = { [Op.in]: boardIds || [] };
+        }
+        // 数据库聚合：按 post_id 分组只取最新一条 sensitive_detected 日志。
+        // 不加日期窗口，避免超期未处理的待审帖子从后台凭空消失；
+        // 性能由 forum_moderation_logs 的 (action) / (post_id, created_at) 索引保障，
+        // 且只把「每个候选帖子一条最新日志」取回内存，而非全部历史日志
+        const latestRows = await ForumModerationLog.findAll({
+            attributes: ['post_id', [sequelize.fn('MAX', sequelize.col('created_at')), 'latest_created']],
+            where: { action: 'sensitive_detected' },
+            group: ['post_id'],
+            raw: true
+        });
+        if (!latestRows.length) return paginateResponse(res, [], 0, page, pageSize);
+        // 用 (post_id, created_at) 精确取回每组最新日志的完整记录（含 after_state 判断是否已审核）
+        const logs = await DbAdapter.findAll(ForumModerationLog, {
+            where: {
+                action: 'sensitive_detected',
+                [Op.or]: latestRows.map(row => ({ post_id: row.post_id, created_at: row.latest_created }))
+            }
+        });
+        // 过滤出仍未审核的帖子
+        const pendingByPost = new Map();
+        for (const log of logs) {
+            if (pendingByPost.has(log.post_id)) continue;
+            let afterState = null;
+            try { afterState = JSON.parse(log.after_state || '{}'); } catch { afterState = {}; }
+            if (!afterState.reviewed) pendingByPost.set(log.post_id, log);
+        }
+        const pendingPostIds = [...pendingByPost.keys()];
+        if (!pendingPostIds.length) return paginateResponse(res, [], 0, page, pageSize);
+
+        const { count, rows } = await DbAdapter.findAndCountAll(Post, {
+            // 排除已删除帖子：用户自删后敏感词日志不会自动关闭，需保证 deleted 帖不进入待审专区
+            where: { id: { [Op.in]: pendingPostIds }, status: { [Op.ne]: 'deleted' }, ...boardWhere },
+            include: [{
+                model: User, as: 'author', attributes: ['id', 'username', 'nickname', 'avatar']
+            }, { model: ForumBoard, as: 'board', attributes: ['id', 'slug', 'name', 'icon', 'color'] }],
+            order: [['created_at', 'DESC']],
+            limit: pageSize, offset
+        });
+        // 把命中详情挂到行上
+        const rowsWithFlag = rows.map(post => {
+            const log = pendingByPost.get(post.id);
+            let sensitiveInfo = null;
+            if (log) {
+                try { sensitiveInfo = JSON.parse(log.after_state || '{}'); } catch { sensitiveInfo = {}; }
+            }
+            return { ...post.toJSON(), sensitive_info: sensitiveInfo, sensitive_log_id: log?.id };
+        });
+        return paginateResponse(res, rowsWithFlag, count, page, pageSize);
+    } catch (error) {
+        console.error('获取待审查帖子错误:', error);
+        return errorResponse(res, '获取失败', 500);
+    }
+}
+
+/**
+ * 审核待审查帖子（标记为已审核）
+ * 记录完整审计：操作者、操作类型（通过/删除/忽略）、原因
+ * 仅允许审核“在待审队列中”的帖子（存在未审核的 sensitive_detected 日志）
+ */
+async function reviewPendingPost(req, res) {
+    try {
+        const { postId } = req.params;
+        const { action, reason } = req.body; // action: pass / delete / ignore
+        if (!['pass', 'delete', 'ignore'].includes(action)) {
+            return errorResponse(res, '无效的审核操作', 400);
+        }
+        const post = await DbAdapter.findByPk(Post, Number(postId), {
+            include: [{ model: User, as: 'author', attributes: ['id', 'username', 'nickname', 'avatar'] }]
+        });
+        if (!post) return errorResponse(res, '帖子不存在', 404);
+        if (post.status === 'deleted') {
+            return errorResponse(res, '该帖子已删除，无法审核', 400);
+        }
+
+        // 分区版主权限检查
+        if (req.user?.role === 'moderator') {
+            const boardIds = await getModeratedBoardIds(req.user);
+            if (!boardIds?.includes(post.board_id)) {
+                return errorResponse(res, '无权审核该板块的帖子', 403);
+            }
+        }
+
+        const operatorId = DbAdapter.getId(req.user);
+        const reviewReason = String(reason || '').trim().slice(0, 500);
+        if (action === 'delete' && reviewReason.length < 2) {
+            return errorResponse(res, '删除操作请填写原因', 400);
+        }
+
+        // 安全校验：仅允许审核“在待审队列中”的帖子（存在未审核的 sensitive_detected 日志），
+        // 防止用 post:review 权限通过该入口处理/删除不在队列中的普通帖子（权限绕路）
+        const pendingLogs = await DbAdapter.findAll(ForumModerationLog, {
+            where: { post_id: post.id, action: 'sensitive_detected' }
+        });
+        const isUnreviewed = (log) => {
+            try { return !(JSON.parse(log.after_state || '{}').reviewed); } catch { return true; }
+        };
+        if (!pendingLogs.some(isUnreviewed)) {
+            return errorResponse(res, '该帖子不在敏感词待审队列中', 400);
+        }
+
+        // 三步操作（删除/恢复帖子、记录审计日志、标记待审日志）必须同一事务，任一步失败整体回滚。
+        // 并发防护：SQLite 用 BEGIN IMMEDIATE 事务（开始即取写锁，串行化并发写事务），
+        // MySQL 用 FOR UPDATE 行锁，避免两个管理员同时审核同一帖子造成重复处理。
+        const TransactionTypes = sequelize.constructor.Transaction ? sequelize.constructor.Transaction.TYPES : null;
+        const useImmediate = sequelize.options.dialect === 'sqlite' && TransactionTypes;
+        const transactionOptions = useImmediate ? { type: TransactionTypes.IMMEDIATE } : {};
+        await sequelize.transaction(transactionOptions, async (t) => {
+            // 事务内二次校验：持锁后重新读取，若已被其他管理员审核则拒绝
+            const freshPending = await DbAdapter.findAll(ForumModerationLog, {
+                where: { post_id: post.id, action: 'sensitive_detected' },
+                transaction: t,
+                lock: sequelize.options.dialect === 'mysql' ? (t.LOCK ? t.LOCK.UPDATE : 'UPDATE') : undefined
+            });
+            if (!freshPending.some(isUnreviewed)) {
+                throw Object.assign(new Error('该帖子已被其他管理员审核'), { statusCode: 400 });
+            }
+            if (action === 'delete') {
+                // 删除帖子：复用完整删帖逻辑（通知/举报/点赞/收藏清理、评论软删、计数清零、审计日志）
+                await softDeletePost(post, operatorId, reviewReason, { action: 'review_delete', transaction: t });
+            } else {
+                // pass / ignore 不修改帖子状态，只记录审计日志
+                const after = { status: post.status, hidden_reason: post.hidden_reason };
+                if (action === 'pass' && post.status === 'hidden' && post.hidden_reason === 'ai_review') {
+                    // 通过：恢复因 AI 审核被隐藏的帖子（仅 ai_review 隐藏，不复活管理员手动隐藏的帖子）
+                    await DbAdapter.update(Post, { status: 'published', hidden_reason: null }, { where: { id: post.id }, transaction: t });
+                    after.status = 'published';
+                    after.hidden_reason = null;
+                }
+                await ForumModerationLog.create({
+                    post_id: post.id,
+                    operator_id: operatorId,
+                    action: action === 'pass' ? 'review_pass' : 'review_ignore',
+                    reason: reviewReason,
+                    before_state: JSON.stringify({ status: post.status, hidden_reason: post.hidden_reason }),
+                    after_state: JSON.stringify(after)
+                }, { transaction: t });
+            }
+            // 标记待审日志为已审核：保留原始 violations/riskLevel/source 结构化信息，仅追加审核结果
+            for (const log of freshPending) {
+                let state = {};
+                try { state = JSON.parse(log.after_state || '{}'); } catch { state = {}; }
+                state.reviewed = true;
+                state.review_action = action;
+                state.reviewer = operatorId;
+                state.reviewed_at = new Date().toISOString();
+                await log.update({ after_state: JSON.stringify(state) }, { transaction: t });
+            }
+        });
+
+        invalidateForumReputation();
+        return successResponse(res, { id: post.id, action }, '审核完成');
+    } catch (error) {
+        console.error('审核待审查帖子错误:', error);
+        // 仅对主动抛出的业务错误(带 statusCode)透出 message，其余返回通用文案避免泄露内部信息
+        return errorResponse(res, error.statusCode ? error.message : '审核失败', error.statusCode || 500);
     }
 }
 
@@ -6109,18 +6289,10 @@ async function deletePost(req, res) {
         if (!post) {
             return errorResponse(res, '帖子不存在', 404);
         }
-        const pid = DbAdapter.getId(post);
         // L5: 删除帖子涉及多表关联数据，必须用事务包裹；Comment 软删保留历史
         // Bug-1: Post 改为软删（status:'deleted' + 计数清零），避免评论 post_id 成为指向已硬删帖子的死指针
-        await sequelize.transaction(async (t) => {
-            await recordModerationLog(pid, DbAdapter.getId(req.user), 'delete_post', reason, { status: post.status }, { status: 'deleted' }, { transaction: t });
-            await DbAdapter.destroy(Notification, { where: { related_id: pid, related_type: 'post' }, transaction: t });
-            await DbAdapter.destroy(Report, { where: { target_id: pid, type: 'post' }, transaction: t });
-            await DbAdapter.destroy(Like, { where: { post_id: pid }, transaction: t });
-            await DbAdapter.destroy(Favorite, { where: { post_id: pid }, transaction: t });
-            await DbAdapter.update(Comment, { status: 'deleted' }, { where: { post_id: pid }, transaction: t });
-            await DbAdapter.update(Post, { status: 'deleted', like_count: 0, collection_count: 0, comment_count: 0 }, { where: { id: pid }, transaction: t });
-        });
+        // 复用 softDeletePost 统一删除逻辑（通知/举报/点赞/收藏清理、评论软删、计数清零、审计日志，事务内完成）
+        await softDeletePost(post, DbAdapter.getId(req.user), reason, { action: 'delete_post' });
         logOperation(req, 'delete_post', 'post', postId, { title: post.title, reason });
         invalidateForumReputation();
         return successResponse(res, null, '删除成功');

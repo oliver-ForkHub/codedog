@@ -168,6 +168,16 @@ export const adminApi = {
     return request.get('/admin/posts', { params })
   },
 
+  // 获取待审查帖子（命中敏感词的帖子）
+  getPendingReviewPosts(params = {}) {
+    return request.get('/admin/posts/pending-review', { params })
+  },
+
+  // 审核待审查帖子（pass/delete/ignore）
+  reviewPendingPost(postId, action, reason) {
+    return request.post(`/admin/posts/${postId}/review`, { action, reason })
+  },
+
   getForumOverview() {
     return request.get('/admin/forum/overview')
   },

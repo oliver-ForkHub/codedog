@@ -612,7 +612,8 @@ const createPost = async () => {
     }
     const res = await postApi.createPost({ ...payload, ...geetestData })
     if (res.code === 200) {
-      ElMessage.success('发布成功')
+      // 使用后端返回的 msg：敏感词命中/转人工审核时有具体提示，避免用户看到“发布成功”但帖子实际未公开
+      ElMessage.success(res.msg || '发布成功')
       postDialogVisible.value = false
       draftStatus.value = ''
       currentPage.value = 1

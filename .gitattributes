@@ -1,0 +1,7 @@
+# 统一行尾策略：所有文本文件使用 LF（Linux 部署必需）
+# shell 脚本/服务端/前端源码全部 LF；Windows 批处理保留 CRLF
+* text=auto eol=lf
+*.sh text eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf

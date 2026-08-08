@@ -53,7 +53,9 @@ function memoryDatabase() {
     async count(options) { return select(state.members, options).length; },
     async findOne({ where }) { return state.members.find(item => matches(item, where)) || null; },
     async findOrCreate({ where, defaults }) { let item = state.members.find(value => matches(value, where)); if (item) return [item, false]; item = row({ ...defaults, ...where, ...now() }); state.members.push(item); return [item, true]; },
-    async create(data) { const item = row({ ...data, ...now() }); state.members.push(item); return item; }
+    async create(data) { const item = row({ ...data, ...now() }); state.members.push(item); return item; },
+    async update(data, options = {}) { let count = 0; for (const item of state.members) { if (matches(item, options.where)) { Object.assign(item, data, { updated_at: new Date() }); count++; } } return [count]; },
+    async destroy(options = {}) { const before = state.members.length; state.members = state.members.filter(item => !matches(item, options.where)); return [before - state.members.length]; }
   };
   const Message = {
     async findAll(options) { return select(state.messages, options); },
@@ -65,7 +67,8 @@ function memoryDatabase() {
     async findAll(options) { return select(state.groups, options); },
     async count(options) { return select(state.groups, options).length; },
     async findOne({ where }) { return state.groups.find(item => matches(item, where)) || null; },
-    async create(data) { const item = row({ member_limit: config.groupDefaultLimit, ...data, ...now() }); state.groups.push(item); return item; }
+    async create(data) { const item = row({ member_limit: config.groupDefaultLimit, ...data, ...now() }); state.groups.push(item); return item; },
+    async destroy(options = {}) { const before = state.groups.length; state.groups = state.groups.filter(item => !matches(item, options.where)); return [before - state.groups.length]; }
   };
   const Image = {
     async findOne({ where }) { return state.images.find(item => matches(item, where)) || null; },

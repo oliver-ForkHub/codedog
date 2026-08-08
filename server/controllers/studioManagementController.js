@@ -206,6 +206,40 @@ async function createAnnouncement(req, res) {
     } catch (error) { return errorResponse(res, '发布公告失败', 500); }
 }
 
+// 更新公告：仅持有 announcement_manage 权限的成员可操作，更新标题/内容/置顶
+async function updateAnnouncement(req, res) {
+    try {
+        if (!await requirePermission(req, res, 'announcement_manage')) return;
+        const announcement = await DbAdapter.findOne(StudioAnnouncement, { where: { id: req.params.announcementId, studio_id: Number(req.params.id) } });
+        if (!announcement) return errorResponse(res, '公告不存在', 404);
+        const before = { title: announcement.title, content: announcement.content, is_pinned: announcement.is_pinned };
+        const title = req.body.title !== undefined ? String(req.body.title).trim().slice(0, 120) : announcement.title;
+        const content = req.body.content !== undefined ? String(req.body.content).trim().slice(0, 10000) : announcement.content;
+        if (!title || !content) return errorResponse(res, '公告标题和内容不能为空', 400);
+        // 内容变更时重新过内容审核
+        if (req.body.title !== undefined || req.body.content !== undefined) {
+            const review = await aiReview.fallbackReview(`${title}\n${content}`);
+            if (review.recommendation !== 'pass') return errorResponse(res, `公告内容需要修改：${review.reason || '未通过内容审核'}`, 400);
+        }
+        const is_pinned = req.body.is_pinned !== undefined ? !!req.body.is_pinned : announcement.is_pinned;
+        await DbAdapter.update(StudioAnnouncement, { title, content, is_pinned }, { where: { id: announcement.id } });
+        await logOperation(req, 'announcement_updated', { targetType: 'studio_announcement', targetId: announcement.id, before: { title: before.title }, after: { title }, isPublic: true });
+        return successResponse(res, { id: announcement.id, title, content, is_pinned }, '公告已更新');
+    } catch (error) { return errorResponse(res, '更新公告失败', 500); }
+}
+
+// 删除公告：仅持有 announcement_manage 权限的成员可操作
+async function deleteAnnouncement(req, res) {
+    try {
+        if (!await requirePermission(req, res, 'announcement_manage')) return;
+        const announcement = await DbAdapter.findOne(StudioAnnouncement, { where: { id: req.params.announcementId, studio_id: Number(req.params.id) } });
+        if (!announcement) return errorResponse(res, '公告不存在', 404);
+        await DbAdapter.destroy(StudioAnnouncement, { where: { id: announcement.id } });
+        await logOperation(req, 'announcement_deleted', { targetType: 'studio_announcement', targetId: announcement.id, before: { title: announcement.title }, isPublic: true });
+        return successResponse(res, null, '公告已删除');
+    } catch (error) { return errorResponse(res, '删除公告失败', 500); }
+}
+
 async function listTasks(req, res) {
     try {
         const member = await getMembership(req.params.id, userId(req));
@@ -351,4 +385,4 @@ async function deleteDiscussion(req, res) {
     } catch (error) { return errorResponse(res, '删除讨论失败', 500); }
 }
 
-module.exports = { PERMISSIONS, effectivePermissions, logOperation, getCapabilities, setMemberPermissions, createInvite, listInvites, revokeInvite, acceptInvite, transferOwnership, listLogs, listAnnouncements, createAnnouncement, listTasks, createTask, updateTask, updateSettings, getAnalytics, updateWorkDisplay, listBlacklist, addBlacklist, removeBlacklist, listDiscussions, createDiscussion, deleteDiscussion };
+module.exports = { PERMISSIONS, effectivePermissions, logOperation, getCapabilities, setMemberPermissions, createInvite, listInvites, revokeInvite, acceptInvite, transferOwnership, listLogs, listAnnouncements, createAnnouncement, updateAnnouncement, deleteAnnouncement, listTasks, createTask, updateTask, updateSettings, getAnalytics, updateWorkDisplay, listBlacklist, addBlacklist, removeBlacklist, listDiscussions, createDiscussion, deleteDiscussion };

@@ -10,7 +10,7 @@ const { isRoleAtLeast, canManageUser } = require('../config/permissions');
 const { likeContains } = require('../utils/security');
 // H12: 引入内容审核服务，落库前做敏感词检查
 const aiReview = require('../services/aiReview');
-const { recordPostRevision } = require('../services/forumHistory');
+const { recordPostRevision, recordModerationLog, softDeletePost } = require('../services/forumHistory');
 const { getForumLeaderboard, getUserForumReputation, invalidateForumReputation } = require('../services/forumReputation');
 
 function canInteractWithPost(post) {
@@ -391,11 +391,25 @@ async function createPost(req, res) {
         if (reviewResult.recommendation === 'delete') {
             return errorResponse(res, `内容包含违规信息:${reviewResult.reason}`, 400);
         }
-        // Post 模型 status 无 pending 枚举，用 hidden 表示待人工复核
-        // 关键: review→hidden 时必须设置 hidden_reason='ai_review',
-        // 否则 updatePost 的恢复条件(status==='hidden' && hidden_reason==='ai_review')永远不满足
-        const postStatus = reviewResult.recommendation === 'review' ? 'hidden' : 'published';
-        const postHiddenReason = postStatus === 'hidden' ? 'ai_review' : null;
+        // 敏感词策略：
+        // - review 且命中具体敏感词 → 不静默拦截，直接发布并提示可能遭人工二次审核与限流，写入后台待审队列
+        // - review 但无命中词（检测服务故障/兜底）→ 禁止 fail-open，隐藏转人工审核并写入待审记录
+        // - pass 命中低级别词 → 仅提示命中词，不拦截、不进待审队列
+        const reviewViolations = reviewResult.violations || [];
+        const reviewNeedsHuman = reviewResult.recommendation === 'review';
+        let postStatus = 'published';
+        let postHiddenReason = null;
+        let reviewLogAfter = null; // review 状态下需要写入待审记录时的 after_state
+        if (reviewNeedsHuman) {
+            if (reviewViolations.length > 0) {
+                reviewLogAfter = { violations: reviewViolations, riskLevel: reviewResult.riskLevel || 'medium', source: reviewResult.source || 'builtin', reviewed: false };
+            } else {
+                // 检测服务不可用：不允许默认放行，转人工审核（隐藏帖子并进入待审队列）
+                postStatus = 'hidden';
+                postHiddenReason = 'ai_review';
+                reviewLogAfter = { violations: [], riskLevel: reviewResult.riskLevel || 'unknown', source: 'fallback', serviceError: true, reviewed: false };
+            }
+        }
         const boardResult = await resolveBoard(board_id, category, req.user.role);
         if (boardResult.error) return errorResponse(res, boardResult.error, 400);
         const normalizedType = POST_TYPES.has(post_type) ? post_type : (boardResult.board.slug === 'question' ? 'question' : boardResult.board.slug === 'tutorial' ? 'tutorial' : 'discussion');
@@ -423,6 +437,15 @@ async function createPost(req, res) {
                 participant_count: 1
             }, { transaction });
             await recordPostRevision(created, DbAdapter.getId(req.user), 'user', 'initial', { transaction });
+            // 待审记录必须与帖子同一事务：任何一步失败整体回滚，避免“孤儿帖子”
+            // （例如帖子已公开但待审日志未写入 → 后台无感知；或帖子已隐藏但待审日志未写入 → 永久卡隐藏）
+            if (reviewLogAfter) {
+                await recordModerationLog(created.id, DbAdapter.getId(req.user), 'sensitive_detected',
+                    reviewViolations.length > 0 ? `命中敏感词: ${reviewViolations.join(', ')} (风险等级: ${reviewResult.riskLevel})` : '敏感词检测服务暂不可用，转人工审核',
+                    null,
+                    reviewLogAfter,
+                    { transaction });
+            }
             await PostDraft.destroy({ where: { user_id: DbAdapter.getId(req.user) }, transaction });
             return created;
         });
@@ -437,7 +460,23 @@ async function createPost(req, res) {
 
         invalidateForumReputation();
 
-        return successResponse(res, result, '发布成功');
+        // 敏感词命中时向用户返回具体命中词+提示（不拦截，直接发布）
+        // 同时记录审计日志，供后台待审专区展示
+        let publishMessage = '发布成功';
+        if (postStatus === 'hidden') {
+            // 检测服务故障被转人工审核：明确告知用户内容未公开，而不是误导为“发布成功”
+            publishMessage = '内容已提交人工审核，暂未公开，请耐心等待审核结果。';
+        } else if (reviewViolations.length > 0) {
+            if (reviewNeedsHuman) {
+                // 中等风险：提示可能遭人工二次审核与限流
+                publishMessage = `发布成功，检测到敏感词: ${reviewViolations.join(', ')}。该内容可能会遭到人工二次审核与限流，请规范发言。`;
+            } else {
+                // 低风险：仅提示命中词，不进待审队列
+                publishMessage = `发布成功，检测到敏感词: ${reviewViolations.join(', ')}。请规范发言。`;
+            }
+        }
+        // 待审日志已在上方同一事务内写入，此处不再重复记录
+        return successResponse(res, result, publishMessage);
     } catch (error) {
         console.error('发布帖子错误:', error);
         return errorResponse(res, '发布失败', 500);
@@ -815,15 +854,34 @@ async function updatePost(req, res) {
             updateData.post_type = post_type;
         }
 
+        // 编辑时的敏感词策略与发帖保持一致：
+        // - review 且命中具体敏感词 → 不隐藏（并恢复 AI 隐藏态），写待审记录
+        // - review 但无命中词（检测服务故障/兜底）→ 禁止 fail-open，隐藏转人工审核，写待审记录
+        // - pass 命中低级别词 → 正常保存，不进待审队列
+        let reviewLogAfter = null;
+        let reviewLogReason = '';
         if (title !== undefined || content !== undefined) {
             const reviewResult = await aiReview.fallbackReview(`${(finalTitle || '')}\n${(finalContent || '')}`);
             if (reviewResult.recommendation === 'delete') {
                 return errorResponse(res, `内容包含违规信息:${reviewResult.reason}`, 400);
             }
+            const reviewViolations = reviewResult.violations || [];
             if (reviewResult.recommendation === 'review') {
-                updateData.status = 'hidden';
-                // 中·绕过隐藏: 加 hidden_reason='ai_review',审核 pass 时仅恢复 ai 隐藏的帖子
-                updateData.hidden_reason = 'ai_review';
+                if (reviewViolations.length > 0) {
+                    // 中等命中：不隐藏帖子；若帖子此前因 AI 审核被隐藏则恢复发布
+                    if (post.status === 'hidden' && post.hidden_reason === 'ai_review') {
+                        updateData.status = 'published';
+                        updateData.hidden_reason = null;
+                    }
+                    reviewLogAfter = { violations: reviewViolations, riskLevel: reviewResult.riskLevel || 'medium', source: reviewResult.source || 'builtin', reviewed: false };
+                    reviewLogReason = `命中敏感词: ${reviewViolations.join(', ')} (风险等级: ${reviewResult.riskLevel})`;
+                } else {
+                    // 检测服务不可用：禁止默认放行，隐藏转人工审核
+                    updateData.status = 'hidden';
+                    updateData.hidden_reason = 'ai_review';
+                    reviewLogAfter = { violations: [], riskLevel: reviewResult.riskLevel || 'unknown', source: 'fallback', serviceError: true, reviewed: false };
+                    reviewLogReason = '敏感词检测服务暂不可用，转人工审核';
+                }
             } else {
                 // 审核通过(pass): 仅恢复因 AI 审核被 hidden 的帖子,不复活管理员手动隐藏的帖子
                 if (post.status === 'hidden' && post.hidden_reason === 'ai_review') {
@@ -837,6 +895,15 @@ async function updatePost(req, res) {
             await DbAdapter.update(Post, updateData, { where: { id }, transaction });
             await post.reload({ transaction });
             await recordPostRevision(post, DbAdapter.getId(req.user), 'user', changeReason, { transaction });
+            // 编辑命中敏感词时写待审记录，保证与发帖行为一致。
+            // 不吞异常：帖子状态修改与待审日志必须同事务同生共死，避免“孤儿帖子”
+            if (reviewLogAfter) {
+                await recordModerationLog(id, DbAdapter.getId(req.user), 'sensitive_detected',
+                    reviewLogReason,
+                    null,
+                    reviewLogAfter,
+                    { transaction });
+            }
         });
 
         const updatedPost = await DbAdapter.findByPk(Post, id, {
@@ -847,7 +914,12 @@ async function updatePost(req, res) {
             }, { model: ForumBoard, as: 'board' }]
         });
         
-        return successResponse(res, updatedPost, '帖子已更新');
+        let updateMessage = '帖子已更新';
+        if (reviewLogAfter?.serviceError) {
+            // 检测服务故障被转人工审核：明确告知用户内容未公开
+            updateMessage = '内容已提交人工审核，暂未公开，请耐心等待审核结果。';
+        }
+        return successResponse(res, updatedPost, updateMessage);
     } catch (error) {
         console.error('更新帖子错误:', error);
         return errorResponse(res, '更新帖子失败', 500);
@@ -878,18 +950,9 @@ async function deletePost(req, res) {
             }
         }
 
-        const pid = DbAdapter.getId(post);
         // L5: 删除帖子涉及多表关联数据，必须用事务包裹；Like/Favorite 无 status 字段保留物理删，Comment/Post 软删保留历史
-        const { Like, Favorite, Comment, Notification } = require('../models');
-        await sequelize.transaction(async (t) => {
-            await DbAdapter.destroy(Notification, { where: { related_id: pid, related_type: 'post' }, transaction: t });
-            await DbAdapter.destroy(Like, { where: { post_id: pid }, transaction: t });
-            await DbAdapter.destroy(Favorite, { where: { post_id: pid }, transaction: t });
-            // Comment 有 status 字段，改为软删避免数据丢失
-            await DbAdapter.update(Comment, { status: 'deleted' }, { where: { post_id: pid }, transaction: t });
-            // 软删帖子并清零计数字段，保持与关联数据一致
-            await DbAdapter.update(Post, { status: 'deleted', like_count: 0, collection_count: 0, comment_count: 0 }, { where: { id: pid }, transaction: t });
-        });
+        // 复用 softDeletePost 统一删除逻辑（通知/举报/点赞/收藏清理、评论软删、计数清零、审计日志，事务内完成）
+        await softDeletePost(post, DbAdapter.getId(req.user), '用户删除帖子', { action: 'delete_post' });
 
         invalidateForumReputation();
         return successResponse(res, null, '帖子已删除');

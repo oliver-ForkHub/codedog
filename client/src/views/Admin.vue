@@ -2732,14 +2732,15 @@ import Posts from './admin/Posts.vue'
 const router = useRouter()
 const userStore = useUserStore()
 
-const getSafeExternalUrl = (value) => {
+const getSafeExternalUrl = (value, expectedOrigin = '') => {
   if (!value) return ''
   try {
     const url = new URL(String(value))
-    return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password ? url.href : ''
-  } catch {
-    return ''
-  }
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return ''
+    // 白名单：若后端返回 IM origin，则只允许跳转到 IM 自身域名，防 open redirect
+    if (expectedOrigin && url.origin !== String(expectedOrigin)) return ''
+    return url.href
+  } catch { return '' }
 }
 
 const activeMenu = ref('dashboard')
@@ -4573,7 +4574,7 @@ const handleMenuSelect = async (key) => {
     try {
       const popup = window.open('about:blank', '_blank')
       const res = await imApi.createSsoTicket({ action: 'admin' })
-      const safeUrl = getSafeExternalUrl(res.data?.url)
+      const safeUrl = getSafeExternalUrl(res.data?.url, res.data?.origin)
       if (res.code === 200 && safeUrl) popup ? (popup.location.href = safeUrl) : window.open(safeUrl, '_blank', 'noopener,noreferrer')
       else { popup?.close(); ElMessage.warning(res.msg || '即时通讯后台暂不可用') }
     } catch (error) { ElMessage.error(error.response?.data?.msg || '无法进入即时通讯后台') }

@@ -91,6 +91,8 @@ export const studioApi = {
   getLogs(id, params = {}) { return request.get(`/studios/${id}/logs`, { params }) },
   getAnnouncements(id) { return request.get(`/studios/${id}/announcements`) },
   createAnnouncement(id, data) { return request.post(`/studios/${id}/announcements`, data) },
+  updateAnnouncement(id, announcementId, data) { return request.put(`/studios/${id}/announcements/${announcementId}`, data) },
+  deleteAnnouncement(id, announcementId, data = {}) { return request.delete(`/studios/${id}/announcements/${announcementId}`, { data }) },
   updateSettings(id, data) { return request.put(`/studios/${id}/settings`, data) },
   getAnalytics(id) { return request.get(`/studios/${id}/analytics`) },
   updateWorkDisplay(id, workId, data) { return request.put(`/studios/${id}/works/${workId}/display`, data) },

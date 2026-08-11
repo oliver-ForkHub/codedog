@@ -21,6 +21,12 @@ const nativeConsole = {
 };
 let consoleCaptureInstalled = false;
 
+function sanitizeSecrets(value) {
+    return String(value ?? '')
+        .replace(/\b(https?|socks5h?|socks4):\/\/([^\s/@:]+):([^\s/@]+)@/gi, '$1://***:***@')
+        .replace(/([?&](?:pass(?:word)?|token|secret|api[_-]?key|auth)=)[^&#\s]*/gi, '$1***');
+}
+
 function ensureLogDir() {
     if (!fs.existsSync(LOG_DIR)) {
         fs.mkdirSync(LOG_DIR, { recursive: true });
@@ -34,7 +40,7 @@ function formatLine(level, tag, message) {
 
 function enqueueWrite(level, tag, message) {
     // 入队异步写入,不阻塞事件循环
-    writeQueue = writeQueue.then(() => doWrite(level, tag, message)).catch((e) => {
+    writeQueue = writeQueue.then(() => doWrite(level, tag, sanitizeSecrets(message))).catch((e) => {
         nativeConsole.error('[logger] write failed:', e.message);
     });
 }
@@ -133,7 +139,7 @@ function getRecentLogs(limit = 200) {
 
             stream.on('end', () => {
                 if (remainder.trim()) lines.push(remainder);
-                resolve(lines.slice(-limit));
+                resolve(lines.slice(-limit).map(sanitizeSecrets));
             });
 
             stream.on('error', () => resolve([]));
@@ -157,7 +163,7 @@ function getRecentLogsSync(limit = 200) {
         fs.closeSync(fd);
         const data = buf.toString('utf8');
         const lines = data.split('\n').filter(l => l.trim());
-        return lines.slice(-limit);
+        return lines.slice(-limit).map(sanitizeSecrets);
     } catch (e) {
         return [];
     }
@@ -189,4 +195,4 @@ function rotateLogIfNeeded() {
     }
 }
 
-module.exports = { log, warn, error, getRecentLogs, writeLog: enqueueWrite, installConsoleCapture, LOG_FILE };
+module.exports = { log, warn, error, getRecentLogs, writeLog: enqueueWrite, installConsoleCapture, sanitizeSecrets, LOG_FILE };

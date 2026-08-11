@@ -21,13 +21,26 @@ const FALLBACK_BASE_URLS = Object.freeze({
     WOOD: 'https://turtle.codemao.cn/player/h5/',
     PYTHON: 'https://turtle.codemao.cn/player/h5/'
 });
+const ALLOWED_PLAYER_HOSTS = new Set([
+    'player.codemao.cn', 'nemo.codemao.cn', 'kn.codemao.cn',
+    'coco.codemao.cn', 'turtle.codemao.cn'
+]);
+
+function isAllowedCodemaoPlayerUrl(value) {
+    try {
+        const url = new URL(String(value || ''));
+        return url.protocol === 'https:' && ALLOWED_PLAYER_HOSTS.has(url.hostname.toLowerCase());
+    } catch {
+        return false;
+    }
+}
 
 function normalizeIdeModel(value) {
     return String(value || '').trim().toUpperCase().replace(/[·\s-]/g, '_');
 }
 
 function buildCodemaoPlayerUrl({ workId, playerUrl, type, ideType }) {
-    if (typeof playerUrl === 'string' && playerUrl.trim()) return playerUrl.trim();
+    if (typeof playerUrl === 'string' && isAllowedCodemaoPlayerUrl(playerUrl.trim())) return playerUrl.trim();
 
     // type 通常包含 Kitten3/Kitten4 等具体型号；ide_type 通常只是 KITTEN 系列名。
     const concreteType = normalizeIdeModel(type);
@@ -38,4 +51,4 @@ function buildCodemaoPlayerUrl({ workId, playerUrl, type, ideType }) {
     return `${baseUrl}${workId}`;
 }
 
-module.exports = { buildCodemaoPlayerUrl, normalizeIdeModel, FALLBACK_BASE_URLS };
+module.exports = { buildCodemaoPlayerUrl, normalizeIdeModel, isAllowedCodemaoPlayerUrl, FALLBACK_BASE_URLS, ALLOWED_PLAYER_HOSTS };

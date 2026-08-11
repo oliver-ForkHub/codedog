@@ -11,11 +11,11 @@ const { WebSocketServer } = require('ws');
 const { Op } = require('sequelize');
 const config = require('./config');
 const { exchangeTicket, parseSession, requireSession } = require('./auth');
-const { connectReplayStore } = require('./replayStore');
+const { connectReplayStore, consumeRateLimit } = require('./replayStore');
 const { acceptStatusPush, assertAccountActive } = require('./accountStatus');
 const { sequelize, UserProfile, Conversation, ConversationMember, Message, Group, Image, AdminAudit, Report, connectDatabase } = require('./database');
 const { uploadImage } = require('./imageHost');
-const { sceneConfig, registerCaptcha, validateCaptcha, requireCaptcha } = require('./captcha');
+const { sceneConfig, registerCaptcha, validateCaptcha, requireCaptcha, assertCaptchaGrant } = require('./captcha');
 
 const app = express();
 const socketsByUser = new Map();
@@ -37,11 +37,13 @@ app.get('/health', async (req, res) => {
 
 app.post('/api/internal/account-status', async (req, res) => {
   try {
-    const { userId, state } = await acceptStatusPush(req.body?.token);
-    if (state.status !== 'active') {
-      for (const socket of socketsByUser.get(userId) || []) socket.close(4001, 'account disabled');
+    const { userId, state, applied } = await acceptStatusPush(req.body?.token);
+    if (applied) {
+      for (const socket of socketsByUser.get(userId) || []) {
+        if (state.status !== 'active' || Number(socket.sessionTokenVersion || 0) !== Number(state.token_version || 0)) socket.close(4001, 'session revoked');
+      }
     }
-    ok(res, { user_id: userId, status: state.status }, '账号状态已同步');
+    ok(res, { user_id: userId, status: state.status, applied }, '账号状态已同步');
   } catch (error) { fail(res, error.statusCode || 401, error.message); }
 });
 
@@ -60,6 +62,7 @@ app.post('/api/auth/sso/exchange', async (req, res) => {
 });
 
 app.post('/api/auth/logout', requireSession, (req, res) => {
+  for (const socket of socketsByUser.get(Number(req.user.id)) || []) socket.close(4001, 'logged out');
   const secure = config.production ? '; Secure' : '';
   res.append('Set-Cookie', `im_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`);
   ok(res, null, '已退出');
@@ -130,7 +133,12 @@ const imageUpload = multer({ dest: imageTempDir, limits: { fileSize: 5 * 1024 * 
 app.post('/api/images', requireSession, imageUpload.single('image'), async (req, res, next) => {
   if (!req.file) return fail(res, 400, '请选择不超过 5 MB 的 JPG、PNG、WebP 或 GIF 图片');
   try {
-    const sha256 = crypto.createHash('sha256').update(fs.readFileSync(req.file.path)).digest('hex');
+    const rateKeys = [`upload:user:${req.user.id}`, `upload:ip:${req.ip}`];
+    for (const key of rateKeys) if (!await consumeRateLimit(key, config.uploadsPerTenMinutes, 10 * 60 * 1000)) return fail(res, 429, '图片上传过于频繁');
+    const sha256 = await new Promise((resolve, reject) => {
+      const hash = crypto.createHash('sha256');
+      fs.createReadStream(req.file.path).on('error', reject).on('data', chunk => hash.update(chunk)).on('end', () => resolve(hash.digest('hex')));
+    });
     const url = await uploadImage(req.file);
     const image = await Image.create({ user_id: req.user.id, url, mime: req.file.mimetype, size: req.file.size, sha256, status: 'ready' });
     ok(res, image, '图片已上传到编程狗现有图床');
@@ -338,6 +346,7 @@ app.post('/api/groups/:id/join', requireSession, async (req, res, next) => {
     const members = await ConversationMember.findAll({ where: { conversation_id: req.params.id, state: 'active' } });
     if (members.length >= Number(group.member_limit)) return fail(res, 409, `群成员已达到 ${group.member_limit} 人上限`);
     const existing = await ConversationMember.findOne({ where: { conversation_id: req.params.id, user_id: req.user.id } });
+    if (existing?.state === 'removed') return fail(res, 403, '您已被移出该群聊，需要管理员重新邀请');
     if (existing) { existing.state = 'active'; if (existing.role !== 'owner') existing.role = 'member'; await existing.save(); }
     else await ConversationMember.create({ conversation_id: req.params.id, user_id: req.user.id, role: 'member', state: 'active' });
     ok(res, { conversation_id: Number(req.params.id), name: group.name }, '已加入群聊');
@@ -473,7 +482,11 @@ app.post('/api/reports', requireSession, async (req, res, next) => {
 });
 
 app.post('/api/messages', requireSession, requireCaptcha('im_message'), async (req, res, next) => {
-  try { const message = await createMessage(req.user, req.body || {}); const [data] = await enrichMessages([message]); broadcastConversation(message.conversation_id, 'message.new', data); ok(res, data, '消息已发送'); }
+  try {
+    if (!await consumeRateLimit(`message:user:${req.user.id}`, config.messagesPerMinute, 60 * 1000)
+        || !await consumeRateLimit(`message:ip:${req.ip}`, config.messagesPerMinute, 60 * 1000)) return fail(res, 429, '发送消息过于频繁');
+    const message = await createMessage(req.user, req.body || {}); const [data] = await enrichMessages([message]); broadcastConversation(message.conversation_id, 'message.new', data); ok(res, data, '消息已发送');
+  }
   catch (error) { next(error); }
 });
 
@@ -740,16 +753,25 @@ server.on('upgrade', async (req, socket, head) => {
   const user = parseSession(req);
   if (!user) return socket.destroy();
   try { await assertAccountActive(user); } catch { return socket.destroy(); }
-  wss.handleUpgrade(req, socket, head, ws => wss.emit('connection', ws, user));
+  if ((socketsByUser.get(Number(user.id))?.size || 0) >= config.maxSocketsPerUser) return socket.destroy();
+  wss.handleUpgrade(req, socket, head, ws => wss.emit('connection', ws, user, req));
 });
-wss.on('connection', (ws, user) => {
+wss.on('connection', (ws, user, req) => {
+  ws.sessionTokenVersion = Number(user.token_version || 0);
   const set = socketsByUser.get(Number(user.id)) || new Set(); set.add(ws); socketsByUser.set(Number(user.id), set);
   ws.send(JSON.stringify({ version: 1, event: 'auth.ok', data: { user_id: user.id } }));
   ws.on('message', async raw => {
     try {
+      if (!await consumeRateLimit(`frame:user:${user.id}`, config.wsFramesPerMinute, 60 * 1000)
+          || !await consumeRateLimit(`frame:ip:${req.socket.remoteAddress}`, config.wsFramesPerMinute, 60 * 1000)) {
+        return ws.close(4008, 'rate limit exceeded');
+      }
       const frame = JSON.parse(raw.toString());
       if (frame.event === 'ping') return ws.send(JSON.stringify({ version: 1, event: 'pong', data: { at: Date.now() } }));
       if (frame.event === 'message.send') {
+        await assertAccountActive(user);
+        if (!await consumeRateLimit(`message:user:${user.id}`, config.messagesPerMinute, 60 * 1000)) throw Object.assign(new Error('发送消息过于频繁'), { statusCode: 429 });
+        await assertCaptchaGrant(user, 'im_message', frame.data?.captcha_grant);
         const message = await createMessage(user, frame.data || {});
         const [data] = await enrichMessages([message]);
         ws.send(JSON.stringify({ version: 1, event: 'message.ack', request_id: frame.request_id, data }));

@@ -106,7 +106,7 @@ async function sanitizeCodemaoProfile(rawNickname, rawBio) {
  * 不再覆盖全局 console.* 以避免污染其他模块
  */
 function addRealtimeLog(level, ...args) {
-    const message = args.map(arg => {
+    const rawMessage = args.map(arg => {
         if (typeof arg === 'string') return arg;
         try {
             return JSON.stringify(arg);
@@ -114,6 +114,8 @@ function addRealtimeLog(level, ...args) {
             return String(arg);
         }
     }).join(' ');
+    const { sanitizeSecrets } = require('../utils/logger');
+    const message = sanitizeSecrets(rawMessage);
 
     realtimeLogs.push({
         time: new Date().toISOString(),

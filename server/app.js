@@ -45,9 +45,14 @@ app.disable('x-powered-by');
 // 信任代理：Docker/Nginx 部署时必需,否则 req.ip 返回 Docker 网关 IP 而非真实客户端 IP
 // 修复:显式把字符串 "false" 识别为关闭,避免 Express 把 "false" 当 IP 解析导致崩溃
 const rawTrustProxy = process.env.TRUST_PROXY;
+if (process.env.NODE_ENV === 'production' && rawTrustProxy === 'true') {
+  throw new Error('TRUST_PROXY=true is unsafe in production; configure explicit trusted proxy CIDRs or hop count');
+}
 const trustProxySetting =
   rawTrustProxy === 'true'
     ? true
+    : rawTrustProxy && /^\d+$/.test(rawTrustProxy)
+      ? Number(rawTrustProxy)
     : rawTrustProxy && rawTrustProxy !== 'false'
       ? rawTrustProxy
       : 'loopback, 172.16.0.0/12, 192.168.0.0/16, 10.0.0.0/8';

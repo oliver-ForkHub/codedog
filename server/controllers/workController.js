@@ -932,7 +932,7 @@ async function deleteWork(req, res) {
         }
 
         const isOwner = work.user_id != null && String(work.user_id) === String(DbAdapter.getId(req.user));
-        if (!isOwner && !isRoleAtLeast(req.user.role, 'moderator')) {
+        if (!isOwner) {
             return errorResponse(res, '无权删除此作品', 403);
         }
         // 修复: moderator 删除他人内容时需校验目标作者角色,不能删除同级或上级管理员的内容

@@ -193,6 +193,20 @@ class ProxyService {
         }
     }
 
+    _redactProxyUrl(proxyUrl) {
+        try {
+            const value = new URL(String(proxyUrl || ''));
+            if (value.username) value.username = '***';
+            if (value.password) value.password = '***';
+            for (const key of [...value.searchParams.keys()]) {
+                if (/pass|password|token|secret|key|auth/i.test(key)) value.searchParams.set(key, '***');
+            }
+            return value.toString();
+        } catch {
+            return '[invalid proxy URL]';
+        }
+    }
+
     _extractProxyList(data) {
         if (!data) return [];
         if (Array.isArray(data)) return data;
@@ -262,13 +276,13 @@ class ProxyService {
         if (!proxyUrl) return;
         this._deadProxies.add(proxyUrl);
         this._failCount++;
-        console.warn(`[代理] 标记死亡: ${proxyUrl}, 死亡数: ${this._deadProxies.size}`);
+        console.warn(`[代理] 标记死亡: ${this._redactProxyUrl(proxyUrl)}, 死亡数: ${this._deadProxies.size}`);
         if (this.currentProxy && this.currentProxy.url === proxyUrl) {
             this.currentProxy = null;
             const next = this.pickOne();
             if (next) {
                 await this.saveCurrentProxy(next);
-                console.log(`[代理] 自动切换至: ${next.url}`);
+                console.log(`[代理] 自动切换至: ${this._redactProxyUrl(next.url)}`);
             } else {
                 await this.saveCurrentProxy(null);
                 console.warn('[代理] 代理池全部死亡, 已清空当前代理');
@@ -308,7 +322,7 @@ class ProxyService {
             ? this.currentProxy
             : this.pickOne();
         if (!proxy) throw new Error('无可用代理');
-        return { proxy: proxy.url, ...(await this.testProxy(proxy.url)) };
+        return { proxy: this._redactProxyUrl(proxy.url), ...(await this.testProxy(proxy.url)) };
     }
 
     getAxiosConfig(config = {}) {
@@ -349,7 +363,7 @@ class ProxyService {
             protocol: this._defaultProtocol || '',
             autoRefresh: this._autoRefreshMinutes || 0,
             autoRefreshRunning: this._autoRefreshEnabled,
-            currentProxy: this.currentProxy ? this.currentProxy.url : null,
+            currentProxy: this.currentProxy ? this._redactProxyUrl(this.currentProxy.url) : null,
             cacheCount: this._cache.length,
             deadCount: this._deadProxies.size
         };

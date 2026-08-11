@@ -663,6 +663,13 @@ async function updateProfile(req, res) {
         }
         
         const updatedUser = await DbAdapter.findByPk(User, DbAdapter.getId(user));
+
+        // The local file is only a staging copy when the external image host
+        // succeeded. Keep it solely when the persisted avatar is the local
+        // fallback URL.
+        if (req.file?.external_url) {
+            cleanupUploadedFile(req.file);
+        }
         
         return successResponse(res, {
             id: DbAdapter.getId(updatedUser),

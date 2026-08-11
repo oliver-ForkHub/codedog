@@ -30,4 +30,8 @@ module.exports = {
   redisUrl: process.env.IM_REDIS_URL || '',
   groupDefaultLimit: Number(process.env.IM_GROUP_DEFAULT_LIMIT || 100),
   groupHardLimit: Number(process.env.IM_GROUP_HARD_LIMIT || 5000)
+  , maxSocketsPerUser: Math.max(1, Number(process.env.IM_MAX_SOCKETS_PER_USER || 5))
+  , wsFramesPerMinute: Math.max(10, Number(process.env.IM_WS_FRAMES_PER_MINUTE || 120))
+  , messagesPerMinute: Math.max(5, Number(process.env.IM_MESSAGES_PER_MINUTE || 30))
+  , uploadsPerTenMinutes: Math.max(1, Number(process.env.IM_UPLOADS_PER_TEN_MINUTES || 10))
 };

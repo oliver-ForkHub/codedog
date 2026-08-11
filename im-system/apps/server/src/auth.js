@@ -6,7 +6,7 @@ const { consumeOnce } = require('./replayStore');
 const crypto = require('crypto');
 const net = require('net');
 const { assertAccountActive } = require('./accountStatus');
-const { setAccountState } = require('./replayStore');
+const { setAccountStateIfNewer } = require('./replayStore');
 
 function normalizeIp(value) {
   let ip = String(value || '').trim().toLowerCase().replace(/^"|"$/g, '').replace(/^::ffff:/, '');
@@ -110,7 +110,7 @@ async function exchangeTicket(ticket, req) {
     status_token: payload.status_token || '', binding_nonce: payload.binding_nonce,
     client_ip_hash: payload.client_ip_hash, client_ip_hashes: payload.client_ip_hashes || [payload.client_ip_hash], client_network_hashes: payload.client_network_hashes || [], browser_hash: payload.browser_hash
   };
-  await setAccountState(user.id, { status: payload.status || 'active', role: user.role, token_version: user.token_version, updated_at: Date.now() });
+  await setAccountStateIfNewer(user.id, { status: payload.status || 'active', role: user.role, token_version: user.token_version, event_version: Number(payload.iat || 0) * 1000, updated_at: Date.now() });
   const session = jwt.sign({ ...user, type: 'im_session' }, config.sessionSecret, {
     algorithm: 'HS256', issuer: 'codedog-im', audience: 'codedog-im-client', expiresIn: '30m'
   });

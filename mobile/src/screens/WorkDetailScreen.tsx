@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Image, Modal, Pressable, ScrollView, StatusBar, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image, Linking, Modal, Pressable, ScrollView, StatusBar, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import { resolveAssetUrl } from '../api/client';
@@ -44,9 +44,10 @@ export function WorkDetailScreen({ route, navigation }: Props) {
   </SafeAreaView>;
 }
 
-function safePlayerUrl(value?: string|null) { if (!value || !/^https?:\/\//i.test(value)) return null; return value; }
+const PLAYER_HOSTS = new Set(['player.codemao.cn', 'nemo.codemao.cn', 'kn.codemao.cn', 'coco.codemao.cn', 'turtle.codemao.cn']);
+function safePlayerUrl(value?: string|null) { try { if (!value) return null; const url = new URL(value); return url.protocol === 'https:' && PLAYER_HOSTS.has(url.hostname.toLowerCase()) ? url.toString() : null; } catch { return null; } }
 const PLAYER_RESIZE_SCRIPT = `requestAnimationFrame(function(){window.dispatchEvent(new Event('resize'));requestAnimationFrame(function(){window.dispatchEvent(new Event('resize'));});});true;`;
-function Player({url,onError,full=false}:{url:string;onError:()=>void;full?:boolean}) { const ref=useRef<WebView>(null); return <WebView ref={ref} source={{uri:url}} style={full?styles.fullWeb:styles.web} androidLayerType="hardware" javaScriptEnabled domStorageEnabled sharedCookiesEnabled thirdPartyCookiesEnabled incognito={false} cacheEnabled allowsFullscreenVideo mediaPlaybackRequiresUserAction={false} setSupportMultipleWindows={false} onLoadEnd={()=>ref.current?.injectJavaScript(PLAYER_RESIZE_SCRIPT)} onError={onError} onHttpError={onError}/>; }
+function Player({url,onError,full=false}:{url:string;onError:()=>void;full?:boolean}) { const ref=useRef<WebView>(null); return <WebView ref={ref} source={{uri:url}} style={full?styles.fullWeb:styles.web} androidLayerType="hardware" javaScriptEnabled domStorageEnabled sharedCookiesEnabled={false} thirdPartyCookiesEnabled={false} incognito cacheEnabled={false} allowsFullscreenVideo mediaPlaybackRequiresUserAction={false} setSupportMultipleWindows={false} onShouldStartLoadWithRequest={(request)=>{ if (safePlayerUrl(request.url)) return true; if (/^https?:\/\//i.test(request.url)) void Linking.openURL(request.url); return false; }} onLoadEnd={()=>ref.current?.injectJavaScript(PLAYER_RESIZE_SCRIPT)} onError={onError} onHttpError={onError}/>; }
 function Stat({icon,label,value}:{icon:keyof typeof Ionicons.glyphMap;label:string;value:number}) { return <View style={styles.stat}><Ionicons name={icon} size={18} color={colors.muted}/><Text style={styles.statValue}>{value}</Text><Text style={styles.statLabel}>{label}</Text></View>; }
 function CommentRow({comment}:{comment:Comment}) { const name=comment.user?.nickname||comment.user?.username||'社区成员'; return <View style={styles.comment}><View style={styles.commentAvatar}><Text style={styles.commentInitial}>{name.slice(0,1)}</Text></View><View style={styles.grow}><Text style={styles.commentName}>{name}</Text><Text style={styles.commentContent}>{comment.content}</Text>{comment.replies?.map((reply)=><Text key={reply.id} style={styles.reply}>↳ {reply.user?.nickname||reply.user?.username||'成员'}：{reply.content}</Text>)}</View></View>; }
 

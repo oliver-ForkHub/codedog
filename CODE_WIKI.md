@@ -468,7 +468,7 @@ im-system/
 
 1. 加载 `dotenv`，调用 `installConsoleCapture()` 劫持全局 console（所有日志同步写文件）
 2. 创建 Express 应用，`app.disable('x-powered-by')`
-3. **信任代理**：`TRUST_PROXY=true` 时启用，否则默认 `loopback, 172.16/12, 192.168/16, 10/8`（修复"false 字符串被当 IP 解析"bug）
+3. **信任代理**：生产环境必须配置明确的代理 CIDR 或跳数（例如单层本机反代使用 `TRUST_PROXY=1`）；禁止使用 `TRUST_PROXY=true`。
 4. **维护模式中间件**：`MAINTENANCE_MODE=1` 或 `.maintenance` 文件存在时拦截所有请求（放行 `/api/admin/*` 和 `/api/users/login`）
 5. **CORS**：基于 `CORS_ORIGIN` 白名单，逗号分隔多域名；未配置时开发环境放行 localhost，生产拒绝
 6. **安全头**：`X-Content-Type-Options`/`X-Frame-Options`/`Referrer-Policy`/`Permissions-Policy`/严格 CSP（`script-src` 仅放行 geetest/hcaptcha/cloudflareinsights）
@@ -2480,10 +2480,10 @@ bash deploy.sh
 3. **关键**：编辑项目根目录 `.env`，设置：
    ```env
    CORS_ORIGIN=https://你的域名.com
-   TRUST_PROXY=true
+TRUST_PROXY=1
    ```
    - `CORS_ORIGIN`：生产环境必填，否则启动会失败
-   - `TRUST_PROXY`：经 Nginx 反代时必须设为 `true`，否则后端取到的 IP 都是 127.0.0.1，限流失效
+   - `TRUST_PROXY`：经单层 Nginx 反代时设为 `1`；复杂拓扑应填写明确代理 CIDR，禁止设为 `true`
    修改后重启容器：`docker compose restart codedog`
 
 4. 宝塔站点设置 → **SSL** → **Let's Encrypt** → 申请免费证书 → 开启**强制 HTTPS**。
@@ -2787,7 +2787,7 @@ cd im-system && docker compose logs -f
 | 启动报 `ECONNREFUSED 3306` | MySQL 未启动或连接信息错误 | 检查 MySQL 服务状态与 `.env` 中 DB_HOST/DB_PORT/DB_USER/DB_PASSWORD |
 | 启动报 `getDialectName is not a function` | 旧版 Sequelize 适配代码残留 | `git pull` + `docker compose build --no-cache` |
 | 用户头像/作品图无法显示 | Codemao CDN 防盗链 + 数据库 URL 反引号污染 | `<img>` 加 `referrerpolicy="no-referrer"`；运行 `codedog` → 5 修复 → 5 修复图片 URL |
-| Nginx 反代后获取 IP 都是 127.0.0.1 | 未设 TRUST_PROXY | `.env` 设 `TRUST_PROXY=true`，重启 |
+| Nginx 反代后获取 IP 都是 127.0.0.1 | 未设 TRUST_PROXY | 单层反代在 `.env` 设 `TRUST_PROXY=1`；复杂拓扑填写明确代理 CIDR，重启 |
 | IM WebSocket 连不上 | Nginx 未配置 Upgrade 头 | Nginx `location /im/ws` 加 `proxy_set_header Upgrade $http_upgrade` |
 | IM SSO 登录失败 | 主站与 IM 密钥不匹配 | 重新运行 `node scripts/keygen.js`，同步 `IM_SSO_PRIVATE_KEY_BASE64` 到主站 `.env` |
 | 部署后 hCaptcha 开关不生效 | 中间件 60 秒缓存 | 等待 60 秒，或 `docker compose restart codedog` 立即生效 |
@@ -2817,7 +2817,7 @@ cd im-system && docker compose logs -f
 | `JWT_EXPIRES_IN` | 否 | 7d | JWT 过期时间 |
 | `SESSION_SECRET` | **是** | - | Session 签名密钥，**≥32 字符**，生产环境留空或弱密钥会启动失败 |
 | `CORS_ORIGIN` | 生产必填 | - | 允许的前端域名，多个用逗号分隔，如 `https://a.com,https://b.com` |
-| `TRUST_PROXY` | 反代时必填 | - | 设为 `true` 时信任 X-Forwarded-* 头，Nginx 反代必须开启 |
+| `TRUST_PROXY` | 反代时必填 | - | 单层反代设为 `1`，复杂拓扑填写明确代理 CIDR；禁止使用 `true` |
 | `IM_PUBLIC_URL` | 接入 IM 时必填 | - | IM 用户端对外地址，如 `https://im.你的域名.com/im` |
 | `IM_SSO_PRIVATE_KEY_BASE64` | 接入 IM 时必填 | - | IM SSO 私钥 PEM 的 Base64 编码 |
 | `IM_SSO_PRIVATE_KEY_FILE` | 二选一 | - | IM SSO 私钥 PEM 文件绝对路径（与 BASE64 二选一）|
@@ -3464,7 +3464,7 @@ mysql -u codedog -p coding_dog < backup.sql
 | HC-27 | Docker 容器必须以非 root 用户运行 | 安全隔离 | Dockerfile `USER app`（宝塔/Render 可选 root） |
 | HC-28 | `im-web` 仅绑 `127.0.0.1:8100`，禁止直接暴露公网 | 必须经 Nginx 反代启用 HTTPS | im-system docker-compose.yml |
 | HC-29 | 主站与 IM 多容器部署必须共享 `JWT_SECRET`/`SESSION_SECRET` | 防 token 跨容器失效 | 部署文档 |
-| HC-30 | Nginx 反代必须设 `TRUST_PROXY=true` | 否则取到的 IP 都是 127.0.0.1，限流失效 | `.env` |
+| HC-30 | Nginx 反代必须配置明确的 `TRUST_PROXY` 跳数或 CIDR | 禁止 `true`；单层反代可设为 `1` | `.env` |
 
 #### 14.1.7 IM 系统
 
@@ -3893,4 +3893,3 @@ node scripts/bind-community.js /opt/codedog    # 参数为主站目录
 ---
 
 **文档结束**
-

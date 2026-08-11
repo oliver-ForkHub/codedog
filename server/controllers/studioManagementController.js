@@ -125,22 +125,37 @@ async function acceptInvite(req, res) {
         const code = String(req.body.code || '').trim();
         if (!code) return errorResponse(res, '请提供邀请码', 400);
         const result = await sequelize.transaction(async transaction => {
-            const invite = await DbAdapter.findOne(StudioInvite, { where: { code, status: 'active' }, transaction });
+            const invite = await DbAdapter.findOne(StudioInvite, { where: { code, status: 'active' }, transaction, lock: transaction.LOCK.UPDATE });
             if (!invite || (invite.expires_at && new Date(invite.expires_at) <= new Date()) || invite.used_count >= invite.max_uses) throw Object.assign(new Error('邀请不存在或已失效'), { statusCode: 400 });
             if (invite.target_user_id && String(invite.target_user_id) !== String(userId(req))) throw Object.assign(new Error('该邀请仅限指定用户使用'), { statusCode: 403 });
-            const studio = await DbAdapter.findByPk(Studio, invite.studio_id, { transaction });
+            const studio = await DbAdapter.findByPk(Studio, invite.studio_id, { transaction, lock: transaction.LOCK.UPDATE });
             if (!studio || studio.status !== 'active') throw Object.assign(new Error('工作室不可加入'), { statusCode: 400 });
             if (studio.recruitment_status !== 'open') throw Object.assign(new Error('工作室已暂停招募'), { statusCode: 400 });
-            if (studio.member_count >= studio.member_limit && !isRoleAtLeast(req.user.role, 'admin')) throw Object.assign(new Error('工作室人数已满'), { statusCode: 400 });
             if (await DbAdapter.findOne(StudioBlacklist, { where: { studio_id: studio.id, user_id: userId(req) }, transaction })) throw Object.assign(new Error('您无法加入该工作室'), { statusCode: 403 });
             const other = await DbAdapter.findOne(StudioMember, { where: { user_id: userId(req), status: { [Op.in]: ['active', 'pending'] }, studio_id: { [Op.ne]: studio.id } }, transaction });
             if (other) throw Object.assign(new Error('您已加入或正在申请其他工作室'), { statusCode: 400 });
+            const existingMember = await DbAdapter.findOne(StudioMember, { where: { studio_id: studio.id, user_id: userId(req) }, transaction, lock: transaction.LOCK.UPDATE });
+            const needsCapacity = !existingMember || existingMember.status !== 'active';
+            if (needsCapacity && !isRoleAtLeast(req.user.role, 'admin')) {
+                const capacityResult = await Studio.update(
+                    { member_count: sequelize.literal('member_count + 1') },
+                    { where: { id: studio.id, member_count: { [Op.lt]: sequelize.col('member_limit') } }, transaction }
+                );
+                if (!capacityResult[0]) throw Object.assign(new Error('工作室人数已满'), { statusCode: 400 });
+            }
+            const inviteClaim = await StudioInvite.update(
+                { used_count: sequelize.literal('used_count + 1'), last_used_at: new Date() },
+                { where: { id: invite.id, status: 'active', used_count: { [Op.lt]: sequelize.col('max_uses') } }, transaction }
+            );
+            if (!inviteClaim[0]) throw Object.assign(new Error('邀请不存在或已失效'), { statusCode: 400 });
             const [member, created] = await StudioMember.findOrCreate({ where: { studio_id: studio.id, user_id: userId(req) }, defaults: { role: 'member', status: 'active' }, transaction });
             const wasActive = !created && member.status === 'active';
             if (!created && !wasActive) await member.update({ status: 'active', review_reason: null }, { transaction });
-            if (created || !wasActive) await Studio.increment('member_count', { where: { id: studio.id }, transaction });
-            const nextUsed = invite.used_count + 1;
-            await invite.update({ used_count: nextUsed, last_used_at: new Date(), status: nextUsed >= invite.max_uses ? 'exhausted' : 'active' }, { transaction });
+            if (needsCapacity && isRoleAtLeast(req.user.role, 'admin')) await Studio.increment('member_count', { where: { id: studio.id }, transaction });
+            await StudioInvite.update(
+                { status: 'exhausted' },
+                { where: { id: invite.id, used_count: { [Op.gte]: sequelize.col('max_uses') } }, transaction }
+            );
             await StudioOperationLog.create({ studio_id: studio.id, operator_id: userId(req), action: 'invite_accepted', target_type: 'studio_invite', target_id: invite.id, reason: '', ip_address: publicIp(req), is_public: true }, { transaction });
             return studio;
         });
@@ -161,14 +176,18 @@ async function transferOwnership(req, res) {
         if (!target || target.role === 'owner') return errorResponse(res, '接任人必须是工作室的活跃成员', 400);
         await sequelize.transaction(async transaction => {
             const before = { owner_id: studio.owner_id, vice_owner_id: studio.vice_owner_id };
-            await StudioMember.update({ role: 'member', permissions: null }, { where: { id: current.id }, transaction });
+            const ownershipClaim = await Studio.update(
+                { owner_id: target.user_id, owner_claim: target.user_id, vice_owner_id: String(studio.vice_owner_id) === String(target.user_id) ? null : studio.vice_owner_id },
+                { where: { id: studio.id, owner_id: userId(req) }, transaction }
+            );
+            if (!ownershipClaim[0]) throw Object.assign(new Error('工作室所有权已发生变化，请刷新后重试'), { statusCode: 409 });
+            await StudioMember.update({ role: 'member', permissions: null }, { where: { studio_id: studio.id, role: 'owner', id: { [Op.ne]: target.id } }, transaction });
             await StudioMember.update({ role: 'owner', permissions: null }, { where: { id: target.id }, transaction });
-            await Studio.update({ owner_id: target.user_id, owner_claim: target.user_id, vice_owner_id: String(studio.vice_owner_id) === String(target.user_id) ? null : studio.vice_owner_id }, { where: { id: studio.id }, transaction });
             await StudioOperationLog.create({ studio_id: studio.id, operator_id: userId(req), action: 'ownership_transferred', target_type: 'user', target_id: target.user_id, reason, before_state: safeJson(before), after_state: safeJson({ owner_id: target.user_id }), ip_address: publicIp(req), is_public: true }, { transaction });
             await notify(target.user_id, '工作室已转让给您', `您已成为「${studio.name}」的新室长`, studio.id, userId(req), transaction);
         });
         return successResponse(res, null, '工作室已完成转让');
-    } catch (error) { console.error('转让工作室失败:', error); return errorResponse(res, '转让工作室失败', 500); }
+    } catch (error) { console.error('转让工作室失败:', error); return errorResponse(res, error.statusCode ? error.message : '转让工作室失败', error.statusCode || 500); }
 }
 
 async function listLogs(req, res) {

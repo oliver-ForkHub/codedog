@@ -12,6 +12,7 @@
     "security:targeted": "node ../scripts/security-targeted-test.js",
     "test:xss-boundaries": "node scripts/smoke-xss-boundaries.js",
     "test:security-boundaries": "node scripts/smoke-security-boundaries.js",
+    "test:security-remediations": "node scripts/smoke-security-remediations.js",
     "test:migration": "node scripts/test-db-migration.js",
     "fix:ipban-dirty": "node scripts/fix-ipban-dirty-data.js",
     "toolbox": "node ../scripts/toolbox.js"

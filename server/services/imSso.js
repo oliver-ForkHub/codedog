@@ -150,13 +150,20 @@ function verifyImStatusToken(token) {
   return payload;
 }
 
+let lastStatusEventVersion = 0;
+function nextStatusEventVersion() {
+    lastStatusEventVersion = Math.max(Date.now(), lastStatusEventVersion + 1);
+    return lastStatusEventVersion;
+}
+
 function createImStatusEvent(user) {
   const userId = user.id || user.user_id;
   return jwt.sign({
     purpose: 'im_status_push',
-    status: user.status,
-    role: user.role,
-    token_version: user.token_version || 0
+      status: user.status,
+      role: user.role,
+      token_version: user.token_version || 0,
+      event_version: nextStatusEventVersion()
   }, signingKey(), {
     algorithm: 'RS256', issuer: 'codedog-community', audience: 'codedog-im-status-push',
     subject: String(userId), jwtid: crypto.randomUUID(), expiresIn: '5m'

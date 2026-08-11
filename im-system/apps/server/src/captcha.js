@@ -92,4 +92,11 @@ function requireCaptcha(scene) {
   };
 }
 
-module.exports = { sceneConfig, registerCaptcha, validateCaptcha, requireCaptcha };
+async function assertCaptchaGrant(user, scene, token) {
+  const current = await sceneConfig(user, scene);
+  if (!current.enabled) return true;
+  if (!verifyGrant(user, scene, token)) throw Object.assign(new Error('请完成安全验证'), { statusCode: 403, captchaRequired: true });
+  return true;
+}
+
+module.exports = { sceneConfig, registerCaptcha, validateCaptcha, requireCaptcha, assertCaptchaGrant };

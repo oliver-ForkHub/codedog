@@ -257,7 +257,7 @@ async function acceptAnswer(req, res) {
         const post = await Post.findOne({ where: { id: Number(req.params.id), status: 'published' } });
         if (!post) return errorResponse(res, '帖子不存在', 404);
         if (post.post_type !== 'question') return errorResponse(res, '只有问答帖可以采纳回答', 400);
-        if (Number(post.user_id) !== Number(DbAdapter.getId(req.user)) && !isRoleAtLeast(req.user.role, 'moderator')) return errorResponse(res, '只有提问者或版务人员可以采纳回答', 403);
+        if (Number(post.user_id) !== Number(DbAdapter.getId(req.user))) return errorResponse(res, '只有提问者可以采纳回答', 403);
         const comment = await Comment.findOne({ where: { id: Number(req.params.commentId), post_id: post.id, parent_id: null, status: 'active' } });
         if (!comment) return errorResponse(res, '回答不存在或不能被采纳', 404);
         post.accepted_comment_id = comment.id;
@@ -785,6 +785,10 @@ async function updatePost(req, res) {
         if (!post) {
             return errorResponse(res, '帖子不存在', 404);
         }
+
+        if (post.status === 'deleted') {
+            return errorResponse(res, '已删除帖子不能编辑', 409);
+        }
         
         if (post.user_id !== DbAdapter.getId(req.user)) {
             return errorResponse(res, '无权修改此帖子', 403);
@@ -938,7 +942,7 @@ async function deletePost(req, res) {
             return errorResponse(res, '帖子不存在', 404);
         }
         
-        if (post.user_id !== DbAdapter.getId(req.user) && !isRoleAtLeast(req.user.role, 'moderator')) {
+        if (post.user_id !== DbAdapter.getId(req.user)) {
             return errorResponse(res, '无权删除此帖子', 403);
         }
         // 修复: moderator 删除他人帖子时需校验目标作者角色,不能删除同级或上级管理员的内容

@@ -1,7 +1,7 @@
 const fs = require('fs');
 const jwt = require('jsonwebtoken');
 const config = require('./config');
-const { consumeOnce, setAccountState, getAccountState } = require('./replayStore');
+const { consumeOnce, setAccountStateIfNewer, getAccountState } = require('./replayStore');
 
 function readPublicKey() { return fs.readFileSync(config.publicKeyFile, 'utf8'); }
 
@@ -11,9 +11,9 @@ async function acceptStatusPush(token) {
   });
   if (payload.purpose !== 'im_status_push' || !payload.sub || !payload.jti) throw Object.assign(new Error('无效的账号状态通知'), { statusCode: 401 });
   if (!await consumeOnce(`status:${payload.jti}`, payload.exp * 1000)) throw Object.assign(new Error('账号状态通知已处理'), { statusCode: 409 });
-  const state = { status: payload.status, role: payload.role, token_version: Number(payload.token_version || 0), updated_at: Date.now() };
-  await setAccountState(Number(payload.sub), state);
-  return { userId: Number(payload.sub), state };
+  const state = { status: payload.status, role: payload.role, token_version: Number(payload.token_version || 0), event_version: Number(payload.event_version || payload.iat * 1000), updated_at: Date.now() };
+  const applied = await setAccountStateIfNewer(Number(payload.sub), state);
+  return { userId: Number(payload.sub), state, applied };
 }
 
 async function assertAccountActive(user) {

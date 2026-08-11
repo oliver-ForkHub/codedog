@@ -437,7 +437,7 @@ async function deleteComment(req, res) {
             return errorResponse(res, '评论不存在', 404);
         }
 
-        if (!sameId(comment.user_id, DbAdapter.getId(req.user)) && !isRoleAtLeast(req.user.role, 'moderator')) {
+        if (!sameId(comment.user_id, DbAdapter.getId(req.user))) {
             return errorResponse(res, '无权删除此评论', 403);
         }
         // 修复: moderator 删除他人评论时需校验目标作者角色,不能删除同级或上级管理员的评论

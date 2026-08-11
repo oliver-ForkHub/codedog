@@ -925,7 +925,9 @@ async function tokenEndpoint(req, res) {
                 return errorResponse(res, '授权权限已失效，请重新授权', 400, 'invalid_grant');
             }
             const tokens = await sequelize.transaction(async (t) => {
-                await DbAdapter.update(OAuthAuthCode, { used_at: new Date() }, { where: { id: authCode.id }, transaction: t });
+                const claimed = await DbAdapter.update(OAuthAuthCode, { used_at: new Date() }, { where: { id: authCode.id, used_at: null }, transaction: t });
+                const claimedCount = Array.isArray(claimed) ? claimed[0] : claimed;
+                if (!claimedCount) throw Object.assign(new Error('授权码已使用'), { code: 'OAUTH_CREDENTIAL_ALREADY_USED' });
                 return issueTokens(app, authCode.user_id, scopes, t);
             });
             return successResponse(res, tokens, 'ok');
@@ -964,14 +966,16 @@ async function tokenEndpoint(req, res) {
                 return errorResponse(res, '授权权限已失效，请重新授权', 400, 'invalid_grant');
             }
             const tokens = await sequelize.transaction(async (t) => {
+                const claimed = await DbAdapter.update(OAuthRefreshToken, { revoked_at: new Date() }, {
+                    where: { id: old.id, revoked_at: null, expires_at: { [Op.gt]: new Date() } }, transaction: t
+                });
+                const claimedCount = Array.isArray(claimed) ? claimed[0] : claimed;
+                if (!claimedCount) throw Object.assign(new Error('refresh_token 已使用'), { code: 'OAUTH_CREDENTIAL_ALREADY_USED' });
                 const issued = await issueTokens(app, old.user_id, scopes, t);
                 // mark old refresh revoked; store replaced_by if we can find new one
                 const newHash = oauth.hashToken(issued.refresh_token);
                 const newRow = await DbAdapter.findOne(OAuthRefreshToken, { where: { token_hash: newHash }, transaction: t });
-                await DbAdapter.update(OAuthRefreshToken, {
-                    revoked_at: new Date(),
-                    replaced_by: newRow ? newRow.id : null
-                }, { where: { id: old.id }, transaction: t });
+                await DbAdapter.update(OAuthRefreshToken, { replaced_by: newRow ? newRow.id : null }, { where: { id: old.id }, transaction: t });
                 // optional: revoke access tokens for this app+user older ones? keep short-lived access
                 return issued;
             });
@@ -980,6 +984,7 @@ async function tokenEndpoint(req, res) {
 
         return errorResponse(res, '不支持的 grant_type', 400, 'unsupported_grant_type');
     } catch (e) {
+        if (e.code === 'OAUTH_CREDENTIAL_ALREADY_USED') return errorResponse(res, e.message, 400, 'invalid_grant');
         console.error('tokenEndpoint', e);
         return errorResponse(res, '换取 token 失败', 500);
     }

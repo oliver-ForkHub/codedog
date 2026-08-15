@@ -2,7 +2,7 @@
   "name": "code-community-client",
   "version": "1.0.0",
   "description": "编程社区前端",
-  "license": "GPL-3.0",
+  "license": "AGPL-3.0",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

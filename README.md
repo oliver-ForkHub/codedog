@@ -4,7 +4,7 @@
   <img src="https://img.shields.io/badge/Vue-3.4-brightgreen" alt="Vue">
   <img src="https://img.shields.io/badge/Node.js-18+-green" alt="Node.js">
   <img src="https://img.shields.io/badge/Element_Plus-2.x-blue" alt="Element Plus">
-  <img src="https://img.shields.io/badge/License-GPL%20v3-blue" alt="License">
+  <img src="https://img.shields.io/badge/License-AGPL%20v3-blue" alt="License">
   <img src="https://img.shields.io/badge/IM-System-orange" alt="IM System">
 </p>
 
@@ -811,12 +811,13 @@ SERVER_PORT=3002
 
 ## 开源协议
 
-本项目基于 [GPL-3.0](LICENSE) 协议开源。
+本项目基于 [AGPL-3.0](LICENSE) 协议开源。
 
-**GPL-3.0 协议要求**：
+**AGPL-3.0 协议要求**：
 - ✅ 可以自由使用、修改、分发
-- ✅ 衍生作品必须使用相同的GPL-3.0协议
+- ✅ 衍生作品必须使用相同的AGPL-3.0协议
 - ✅ 修改后的代码必须开源
+- ✅ 以网络服务形式提供也必须向用户提供源码
 - ❌ 不能将代码闭源商业化
 
 ## 📸 界面预览

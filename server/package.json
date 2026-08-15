@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "编程社区后端服务",
   "main": "app.js",
-  "license": "GPL-3.0",
+  "license": "AGPL-3.0",
   "scripts": {
     "start": "node app.js",
     "dev": "nodemon app.js",

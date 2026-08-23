@@ -1,6 +1,7 @@
 import { apiGet, apiPost } from './client';
 export type GeetestConfig = { enabled: boolean; captcha_id: string; product?: string; scenes: Record<string, boolean> };
-export type GeetestRegister = { gt: string; challenge: string; success: number; new_captcha: boolean };
+// 极验4 register 接口仅返回 captcha_id + success
+export type GeetestRegister = { captcha_id: string; success: number };
 export const captchaApi = {
   config: () => apiGet<GeetestConfig>('/geetest/config'),
   register: () => apiGet<GeetestRegister>('/geetest/register'),

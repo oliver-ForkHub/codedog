@@ -36,7 +36,7 @@ const currentScene = ref('')
 
 const loadScript = () => {
   return new Promise((resolve, reject) => {
-    // 已加载完成直接 resolve
+    // 已加载完成（页面任何来源注入的 hcaptcha 均可复用）直接 resolve
     if (window.hcaptcha) {
       resolve()
       return
@@ -44,13 +44,11 @@ const loadScript = () => {
 
     const existing = document.querySelector('script[data-hcaptcha-loader="true"]')
     if (existing) {
-      // 修复：脚本已加载完成时 readyState 为 loaded/complete，此时不会再触发 load 事件，需直接 resolve
-      if (existing.readyState === 'loaded' || existing.readyState === 'complete') {
-        resolve()
-      } else {
-        existing.addEventListener('load', () => resolve(), { once: true })
-        existing.addEventListener('error', () => reject(new Error('hCaptcha 脚本加载失败')), { once: true })
-      }
+      // 修复：动态创建的非 IE script 通常没有 readyState 属性。
+      // 原逻辑在「脚本已存在但 load 事件已触发过」时会永远等不到 load，导致重复弹出时卡死转圈（弹不出验证码）。
+      // 改为始终挂一次性 load/error 监听；若此刻脚本已加载完成，顶部 window.hcaptcha 分支已提前返回。
+      existing.addEventListener('load', () => resolve(), { once: true })
+      existing.addEventListener('error', () => reject(new Error('hCaptcha 脚本加载失败')), { once: true })
       return
     }
 
@@ -97,7 +95,11 @@ const renderCaptcha = async () => {
     widgetId.value = window.hcaptcha.render(captchaContainer.value, {
       sitekey: siteKey.value,
       callback: onVerify,
-      'error-callback': onError
+      'error-callback': onError,
+      // 官方文档: token 只能使用一次且需尽快校验。
+      // 若不注册该回调,用户在验证完成后迟迟不提交、token 过期时,界面不会自动重置,
+      // 会造成"验证通过却始终过不了"的假象。
+      'expired-callback': onExpired
     })
   }
 }
@@ -158,6 +160,13 @@ const onVerify = async (token) => {
 
 const onError = () => {
   error.value = '验证出错，请重试'
+}
+
+const onExpired = () => {
+  error.value = '验证已过期，请重试'
+  if (window.hcaptcha && widgetId.value !== null) {
+    window.hcaptcha.reset(widgetId.value)
+  }
 }
 
 onUnmounted(() => {

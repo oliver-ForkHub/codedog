@@ -2178,6 +2178,9 @@
                   <el-switch v-model="configForm[item.key]" active-value="true" inactive-value="false" />
                 </div>
               </div>
+              <el-form-item>
+                <el-button type="primary" @click="saveGeetestConfig" :loading="savingConfigs">保存极验设置</el-button>
+              </el-form-item>
             </el-form>
           </div>
 
@@ -3834,6 +3837,9 @@ const sensitiveConfigKeys = ['ai_api_key', 'geetest_key', 'hcaptcha_secret_key',
 const saveConfigs = async () => {
   savingConfigs.value = true
   try {
+    // 修复: 全局保存时同步"验证有效期"输入框的独立变量,避免只改有效期后点全局保存不生效、
+    // 刷新后看到旧值的"显示与真实不一致"问题(与 saveSecurityConfig 保持一致)
+    configForm.value.hcaptcha_expire_minutes = String(hcaptchaExpireMinutes.value)
     const payload = { ...configForm.value }
     sensitiveConfigKeys.forEach(key => {
       if (MASKED_PLACEHOLDERS.includes(payload[key])) {
@@ -3861,6 +3867,27 @@ const geetestConfigKeys = [
   'geetest_developer_app', 'geetest_im_message', 'geetest_im_search',
   'geetest_im_create_group'
 ]
+
+const saveGeetestConfig = async () => {
+  savingConfigs.value = true
+  try {
+    // 只提交极验相关字段,避免误动到 hCaptcha 与其它系统配置
+    const payload = Object.fromEntries(
+      geetestConfigKeys.map(key => [key, configForm.value[key]])
+    )
+    if (MASKED_PLACEHOLDERS.includes(payload.geetest_key)) {
+      delete payload.geetest_key
+    }
+    const res = await adminApi.batchUpdateConfigs(payload)
+    if (res.code === 200) {
+      ElMessage.success('极验配置已保存')
+    } else {
+      ElMessage.error(res.msg || '保存失败')
+    }
+  } catch (e) {
+    ElMessage.error('保存失败')
+  } finally { savingConfigs.value = false }
+}
 
 const saveSecurityConfig = async () => {
   savingConfigs.value = true

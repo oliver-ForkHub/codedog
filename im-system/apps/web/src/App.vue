@@ -272,10 +272,10 @@ const refreshSidebar = async () => {
   loadReadSequences(items)
 }
 const loadGeetestScript = () => new Promise((resolve, reject) => {
-  if (window.initGeetest) return resolve()
+  if (window.initGeetest4) return resolve()
   const existing = document.querySelector('script[data-codedog-geetest]')
   if (existing) { existing.addEventListener('load', resolve, { once:true }); existing.addEventListener('error', reject, { once:true }); return }
-  const script = document.createElement('script'); script.dataset.codedogGeetest = '1'; script.src = 'https://static.geetest.com/static/js/gt.0.5.0.js'; script.onload = resolve; script.onerror = reject; document.head.appendChild(script)
+  const script = document.createElement('script'); script.dataset.codedogGeetest = '1'; script.src = 'https://static.geetest.com/v4/gt4.js'; script.onload = resolve; script.onerror = reject; document.head.appendChild(script)
 })
 const cancelCaptcha = () => { const resolve = captchaDialog.resolve; captchaDialog.open = false; captchaDialog.resolve = null; resolve?.(null) }
 const getCaptchaGrant = async scene => {
@@ -288,10 +288,14 @@ const getCaptchaGrant = async scene => {
   const validation = await new Promise(async resolve => {
     captchaDialog.open = true; captchaDialog.scene = scene; captchaDialog.error = ''; captchaDialog.resolve = resolve
     await nextTick()
-    window.initGeetest({ gt:registration.gt, challenge:registration.challenge, offline:!registration.success, new_captcha:registration.new_captcha, product:registration.product || 'popup', width:'100%' }, captcha => {
-      captcha.appendTo(captchaBox.value)
-      captcha.onReady(() => { if ((registration.product || 'popup') === 'bind') captcha.verify() })
-      captcha.onSuccess(() => resolve(captcha.getValidate()))
+    window.initGeetest4({ captchaId:registration.captcha_id, product:registration.product || 'popup', nativeButton:{ width:'100%' } }, captcha => {
+      // 极验4: 仅 float 才内嵌 appendTo; popup/bind 需 onReady 后 showCaptcha 弹出
+      if ((registration.product || 'popup') === 'float') captcha.appendTo(captchaBox.value)
+      captcha.onReady(() => { const product = registration.product || 'popup'; if (product === 'bind' || product === 'popup') captcha.showCaptcha() })
+      captcha.onSuccess(() => {
+        const r = captcha.getValidate()
+        resolve({ geetest_lot_number:r.lot_number, geetest_captcha_output:r.captcha_output, geetest_pass_token:r.pass_token, geetest_gen_time:r.gen_time })
+      })
       captcha.onError(() => { captchaDialog.error = '极验加载失败，请重试' })
     })
   })

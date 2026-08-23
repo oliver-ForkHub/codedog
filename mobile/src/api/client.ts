@@ -12,7 +12,7 @@ type ApiEnvelope<T> = {
   data: T;
 };
 
-export type CaptchaFields = Partial<{ geetest_challenge: string; geetest_validate: string; geetest_seccode: string }>;
+export type CaptchaFields = Partial<{ geetest_lot_number: string; geetest_captcha_output: string; geetest_pass_token: string; geetest_gen_time: string }>;
 type CaptchaHandler = (scene: string, kind: 'geetest' | 'hcaptcha') => Promise<CaptchaFields | null>;
 let captchaHandler: CaptchaHandler | null = null;
 export function setCaptchaHandler(handler: CaptchaHandler | null) { captchaHandler = handler; }

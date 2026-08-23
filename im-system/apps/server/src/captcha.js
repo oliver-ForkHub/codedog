@@ -51,9 +51,10 @@ async function validateCaptcha(user, scene, payload) {
   if (!current.enabled) return { required: false, grant: '' };
   await communityRequest(user, 'post', '/api/geetest/validate', {
     scene,
-    challenge: payload?.geetest_challenge,
-    validate: payload?.geetest_validate,
-    seccode: payload?.geetest_seccode
+    lot_number: payload?.geetest_lot_number,
+    captcha_output: payload?.geetest_captcha_output,
+    pass_token: payload?.geetest_pass_token,
+    gen_time: payload?.geetest_gen_time
   });
   return { required: true, grant: issueGrant(user, scene) };
 }

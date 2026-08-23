@@ -13,13 +13,16 @@ function geetestVerify(scene) {
             // 修复: 不在 middleware 层提前拦截缺失参数,而是交给 GeetestService.verify 统一判断
             // 原因: 极验未启用时 config.enabled=false, verify 会直接放行(success:true),
             //       但原代码的提前拦截会导致"未启用极验也无法发帖"
-            const { geetest_challenge, geetest_validate, geetest_seccode } = req.body || {};
+            const { geetest_lot_number, geetest_captcha_output, geetest_pass_token, geetest_gen_time } = req.body || {};
 
             const result = await GeetestService.verify(
                 resolvedScene,
-                geetest_challenge,
-                geetest_validate,
-                geetest_seccode,
+                {
+                    lot_number: geetest_lot_number,
+                    captcha_output: geetest_captcha_output,
+                    pass_token: geetest_pass_token,
+                    gen_time: geetest_gen_time
+                },
                 req
             );
 

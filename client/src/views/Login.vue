@@ -125,7 +125,8 @@ const handleLogin = async () => {
   if (!valid) return
   
   if (geetestEnabled.value && !geetestValidated.value) {
-    ElMessage.warning('请完成验证码验证')
+    // popup 是弹窗型：GeetestCaptcha 未内嵌 appendTo，点击登录时触发 showCaptcha 弹窗
+    if (geetestRef.value) geetestRef.value.verify()
     return
   }
   

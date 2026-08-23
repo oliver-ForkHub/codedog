@@ -36,6 +36,28 @@ const captchaObj = ref(null)
 const resolvePromise = ref(null)
 const currentScene = ref('')
 
+// 极验4 脚本加载缓存,避免重复注入
+let gt4ScriptPromise = null
+const loadGt4Script = () => {
+  if (window.initGeetest4) return Promise.resolve()
+  if (gt4ScriptPromise) return gt4ScriptPromise
+  gt4ScriptPromise = new Promise((resolve, reject) => {
+    const existing = document.querySelector('script[data-gt4-loader="true"]')
+    if (existing) {
+      existing.addEventListener('load', () => resolve(), { once: true })
+      existing.addEventListener('error', () => reject(new Error('极验4脚本加载失败')), { once: true })
+      return
+    }
+    const script = document.createElement('script')
+    script.src = 'https://static.geetest.com/v4/gt4.js'
+    script.dataset.gt4Loader = 'true'
+    script.onload = () => resolve()
+    script.onerror = () => reject(new Error('极验4脚本加载失败'))
+    document.head.appendChild(script)
+  })
+  return gt4ScriptPromise
+}
+
 const onOpen = () => {
   initCaptcha()
 }
@@ -65,46 +87,45 @@ const initCaptcha = async () => {
     }
     
     const registerRes = await geetestApi.register()
-    if (registerRes.code !== 200) {
+    if (registerRes.code !== 200 || !registerRes.data || !registerRes.data.captcha_id) {
       throw new Error('验证码注册失败')
     }
     
-    const { gt, challenge, success, new_captcha } = registerRes.data
+    const captchaId = registerRes.data.captcha_id
     const product = configRes.data.product || 'popup'
     
-    if (!window.initGeetest) {
-      const script = document.createElement('script')
-      script.src = 'https://static.geetest.com/static/js/gt.0.5.0.js'
-      script.onload = () => loadCaptcha(gt, challenge, success, new_captcha, product)
-      script.onerror = () => {
-        error.value = '验证码脚本加载失败'
-        loading.value = false
-      }
-      document.head.appendChild(script)
-    } else {
-      loadCaptcha(gt, challenge, success, new_captcha, product)
-    }
+    // 先确保极验4脚本就绪,再初始化
+    await loadGt4Script()
+    loadCaptcha(captchaId, product)
   } catch (e) {
     error.value = e.message || '验证码初始化失败'
     loading.value = false
+    // 初始化失败时主动 resolve,避免调用方永远等待
+    if (resolvePromise.value) {
+      resolvePromise.value({})
+      resolvePromise.value = null
+    }
   }
 }
 
-const loadCaptcha = (gt, challenge, offline, newCaptcha, product) => {
-  window.initGeetest({
-    gt,
-    challenge,
-    offline: !offline,
-    new_captcha: newCaptcha,
-    product: product,
-    width: '100%'
+const loadCaptcha = (captchaId, product) => {
+  if (typeof window.initGeetest4 !== 'function') {
+    throw new Error('极验4脚本未加载')
+  }
+  
+  window.initGeetest4({
+    captchaId,
+    product,
+    nativeButton: { width: '100%' }
   }, (captcha) => {
     captchaObj.value = captcha
     
     captcha.onReady(() => {
       loading.value = false
-      if (product === 'bind') {
-        captcha.verify()
+      // 极验4 语义: float 用 appendTo 内嵌; popup/bind 的 appendTo 无效,
+      // 必须在 onReady 之后调用 showCaptcha() 弹窗。若不弹，用户将看到空对话框。
+      if (product === 'bind' || product === 'popup') {
+        captcha.showCaptcha()
       }
     })
     
@@ -112,9 +133,10 @@ const loadCaptcha = (gt, challenge, offline, newCaptcha, product) => {
       const result = captcha.getValidate()
       if (result && resolvePromise.value) {
         resolvePromise.value({
-          geetest_challenge: result.geetest_challenge,
-          geetest_validate: result.geetest_validate,
-          geetest_seccode: result.geetest_seccode
+          geetest_lot_number: result.lot_number,
+          geetest_captcha_output: result.captcha_output,
+          geetest_pass_token: result.pass_token,
+          geetest_gen_time: result.gen_time
         })
         resolvePromise.value = null
       }

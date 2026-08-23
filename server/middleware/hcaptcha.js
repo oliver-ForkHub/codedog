@@ -87,7 +87,7 @@ async function verifyHcaptcha(token, secret) {
         const params = new URLSearchParams();
         params.append('secret', secret);
         params.append('response', token);
-        const response = await axios.post('https://hcaptcha.com/siteverify', params.toString(), {
+        const response = await axios.post('https://api.hcaptcha.com/siteverify', params.toString(), {
             timeout: 10000
         });
         // 修复 L9: 日志不再打印整个 response.data,只打印布尔结果,避免泄露

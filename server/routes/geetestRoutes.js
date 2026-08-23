@@ -57,7 +57,11 @@ router.get('/config', async (req, res) => {
             configMap[c.config_key] = c.config_value;
         });
         
-        const geetestId = configMap.geetest_id || '';
+        // 修复: 与 geetestService.getConfig 保持一致——id 支持回退到环境变量。
+        // 原来只认 DB id,若 captcha_id 配置在环境变量(GEETEST_ID)会导致前端判定
+        // enabled:false(不弹验证码),而后端 verify 判定 enabled:true(强制验证),
+        // 出现"要求验证却无验证码"的通关失败。
+        const geetestId = configMap.geetest_id || GEETEST_ID;
         const enabled = configMap.geetest_enabled === 'true' && !!geetestId;
         
         return successResponse(res, {
@@ -108,26 +112,24 @@ router.post('/show', async (req, res) => {
 router.get('/register', geetestRegisterRateLimiter, async (req, res) => {
     try {
         let geetestId = GEETEST_ID;
-        let geetestKey = GEETEST_KEY;
         
         const idConfig = await DbAdapter.findOne(SystemConfig, { where: { config_key: 'geetest_id' } });
         if (idConfig && idConfig.config_value) {
             geetestId = idConfig.config_value;
         }
         
-        const keyConfig = await DbAdapter.findOne(SystemConfig, { where: { config_key: 'geetest_key' } });
-        if (keyConfig && keyConfig.config_value) {
-            geetestKey = keyConfig.config_value;
-        }
-        
-        if (!geetestId || !geetestKey) {
+        if (!geetestId) {
             return errorResponse(res, '极验未配置', 400);
         }
         
-        const geetest = new GeetestLib(geetestId, geetestKey);
-        const result = await geetest.register('md5');
-        
-        return successResponse(res, result);
+        // GT4 前端仅需 captcha_id 即可调用 initGeetest4 初始化
+        const geetest = new GeetestLib(geetestId, '');
+        const result = await geetest.register();
+        // 对外返回前端所需的 captcha_id 字段（前端按 configRes.data.captcha_id 使用）
+        if (result.code === 1) {
+            return successResponse(res, { captcha_id: result.captcha_id, success: 1 });
+        }
+        return errorResponse(res, '验证码注册失败', 500);
     } catch (error) {
         console.error('极验注册错误:', error);
         return errorResponse(res, '验证码注册失败', 500);
@@ -137,7 +139,13 @@ router.get('/register', geetestRegisterRateLimiter, async (req, res) => {
 router.post('/validate', async (req, res) => {
     let scene = 'global';
     try {
-        const { challenge, validate, seccode, scene: reqScene } = req.body;
+        const {
+            lot_number,
+            captcha_output,
+            pass_token,
+            gen_time,
+            scene: reqScene
+        } = req.body || {};
         scene = reqScene || 'global';
         
         let geetestId = GEETEST_ID;
@@ -157,17 +165,10 @@ router.post('/validate', async (req, res) => {
             return errorResponse(res, '极验未配置', 400);
         }
         
-        // 修复跨实例 bug: /validate 创建的是新 GeetestLib 实例，从未调用过 register()，
-        // lastRegisterSuccess 默认为 true，fallback 为 false（正常模式）。
-        // 当极验宕机时，/register 探测到故障返回本地随机 challenge，
-        // 但 /validate 仍以 fallback=false 向极验服务器发起真实验证，必然失败。
-        // 修复方案: validate 前先调用 register() 探测极验服务状态，更新实例的 lastRegisterSuccess 字段，
-        // 这样 validate 时能正确决定 fallback 模式（极验宕机时走本地校验 seccode）。
         const geetest = new GeetestLib(geetestId, geetestKey);
-        await geetest.register();
 
-        // 再执行 validate，根据 lastRegisterSuccess 决定 fallback 模式
-        const result = await geetest.validate(challenge, validate, seccode);
+        // 执行 GT4 服务端二次校验（内部生成 HMAC-SHA256 签名并请求极验 API）
+        const result = await geetest.validate({ lot_number, captcha_output, pass_token, gen_time });
         
         if (result.result === 'success') {
             await recordStats('geetest', scene || 'global', 'pass', req);

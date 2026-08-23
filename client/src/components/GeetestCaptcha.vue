@@ -32,6 +32,28 @@ const validated = ref(false)
 const validateData = ref(null)
 const config = ref(null)
 
+// 极验4 基础脚本 USED 缓存标识，避免重复注入
+let gt4ScriptPromise = null
+const loadGt4Script = () => {
+  if (window.initGeetest4) return Promise.resolve()
+  if (gt4ScriptPromise) return gt4ScriptPromise
+  gt4ScriptPromise = new Promise((resolve, reject) => {
+    const existing = document.querySelector('script[data-gt4-loader="true"]')
+    if (existing) {
+      existing.addEventListener('load', () => resolve(), { once: true })
+      existing.addEventListener('error', () => reject(new Error('极验4脚本加载失败')), { once: true })
+      return
+    }
+    const script = document.createElement('script')
+    script.src = 'https://static.geetest.com/v4/gt4.js'
+    script.dataset.gt4Loader = 'true'
+    script.onload = () => resolve()
+    script.onerror = () => reject(new Error('极验4脚本加载失败'))
+    document.head.appendChild(script)
+  })
+  return gt4ScriptPromise
+}
+
 const init = async () => {
   loading.value = true
   error.value = ''
@@ -54,55 +76,46 @@ const init = async () => {
     }
     
     const registerRes = await geetestApi.register()
-    if (registerRes.code !== 200) {
+    if (registerRes.code !== 200 || !registerRes.data || !registerRes.data.captcha_id) {
       throw new Error('验证码注册失败')
     }
     
-    const { gt, challenge, success, new_captcha } = registerRes.data
+    const captchaId = registerRes.data.captcha_id
     const product = configRes.data.product || 'popup'
     
-    if (!window.initGeetest) {
-      const script = document.createElement('script')
-      script.src = 'https://static.geetest.com/static/js/gt.0.5.0.js'
-      script.onload = () => loadCaptcha(gt, challenge, success, new_captcha, product)
-      script.onerror = () => {
-        error.value = '验证码脚本加载失败'
-        loading.value = false
-        // 修复: 脚本加载失败时通知父组件禁用验证码,否则用户无法通过登录验证
-        emit('ready', { enabled: false })
-      }
-      document.head.appendChild(script)
-    } else {
-      loadCaptcha(gt, challenge, success, new_captcha, product)
-    }
+    // 先确保极验4脚本就绪,再初始化
+    await loadGt4Script()
+    loadCaptcha(captchaId, product)
   } catch (e) {
     error.value = e.message || '验证码初始化失败'
     loading.value = false
-    // 修复: 初始化失败时也通知父组件禁用验证码,否则用户无法通过登录验证
+    // 修复: 初始化失败时也通知父组件禁用验证码,否则用户无法通过验证
     emit('ready', { enabled: false })
     emit('error', e)
   }
 }
 
-const loadCaptcha = async (gt, challenge, offline, newCaptcha, product) => {
+const loadCaptcha = async (captchaId, product) => {
   try {
     await geetestApi.recordShow(props.scene)
   } catch (e) {
     console.error('记录验证码展示失败:', e)
   }
   
-  window.initGeetest({
-    gt,
-    challenge,
-    offline: !offline,
-    new_captcha: newCaptcha,
-    product: product,
-    width: '100%'
+  if (typeof window.initGeetest4 !== 'function') {
+    throw new Error('极验4脚本未加载')
+  }
+  
+  window.initGeetest4({
+    captchaId,
+    product,
+    nativeButton: { width: '100%' }
   }, (captcha) => {
     captchaObj.value = captcha
     
-    // 修复: 检查 DOM ref 是否存在,避免组件卸载后 appendTo(null) 抛错
-    if (captchaBox.value) {
+    // 极验4: 仅 float 模式才用 appendTo 内嵌渲染; popup/bind 的 appendTo 无效,
+    // 需由登录/业务触发 verify()(内部调用 showCaptcha) 弹窗。
+    if (product === 'float' && captchaBox.value) {
       captcha.appendTo(captchaBox.value)
     }
     
@@ -115,9 +128,10 @@ const loadCaptcha = async (gt, challenge, offline, newCaptcha, product) => {
       const result = captcha.getValidate()
       if (result) {
         validateData.value = {
-          geetest_challenge: result.geetest_challenge,
-          geetest_validate: result.geetest_validate,
-          geetest_seccode: result.geetest_seccode
+          geetest_lot_number: result.lot_number,
+          geetest_captcha_output: result.captcha_output,
+          geetest_pass_token: result.pass_token,
+          geetest_gen_time: result.gen_time
         }
         validated.value = true
         emit('success', validateData.value)
@@ -150,8 +164,9 @@ const reset = () => {
 }
 
 const verify = () => {
+  // GT4 手动触发验证弹窗使用 showCaptcha()
   if (captchaObj.value) {
-    captchaObj.value.verify()
+    captchaObj.value.showCaptcha()
   }
 }
 

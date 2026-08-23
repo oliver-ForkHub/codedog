@@ -105,7 +105,7 @@ function shouldPromoteInitialAdmin(req, codemaoUserId, userCount) {
  */
 async function login(req, res) {
     try {
-        const { username, password, geetest_challenge, geetest_validate, geetest_seccode } = req.body;
+        const { username, password, geetest_lot_number, geetest_captcha_output, geetest_pass_token, geetest_gen_time } = req.body;
         
         if (!username || !password) {
             return errorResponse(res, '请输入用户名和密码', 400);
@@ -113,9 +113,12 @@ async function login(req, res) {
         
         const result = await GeetestService.verify(
             'login', 
-            geetest_challenge, 
-            geetest_validate, 
-            geetest_seccode, 
+            {
+                lot_number: geetest_lot_number,
+                captcha_output: geetest_captcha_output,
+                pass_token: geetest_pass_token,
+                gen_time: geetest_gen_time
+            }, 
             req
         );
         
@@ -531,15 +534,18 @@ async function getCurrentUser(req, res) {
  */
 async function updateProfile(req, res) {
     try {
-        let { nickname, bio, doing, profile_cover, show_favorites, geetest_challenge, geetest_validate, geetest_seccode } = req.body;
+        let { nickname, bio, doing, profile_cover, show_favorites, geetest_lot_number, geetest_captcha_output, geetest_pass_token, geetest_gen_time } = req.body;
         
         const result = req.geetestVerifiedScenes?.has('update_profile')
             ? { success: true }
             : await GeetestService.verify(
                 'update_profile',
-                geetest_challenge,
-                geetest_validate,
-                geetest_seccode,
+                {
+                    lot_number: geetest_lot_number,
+                    captcha_output: geetest_captcha_output,
+                    pass_token: geetest_pass_token,
+                    gen_time: geetest_gen_time
+                },
                 req
             );
         

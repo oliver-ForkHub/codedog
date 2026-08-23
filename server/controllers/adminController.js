@@ -3550,7 +3550,8 @@ function updateEnvVariable(content, key, value) {
 function redactConfigDetails(configs = {}) {
     const redacted = {};
     for (const [key, value] of Object.entries(configs)) {
-        redacted[key] = /password|secret|token|api[_-]?key|auth/i.test(key) ? '***' : value;
+        // redactConfigDetails 用于操作日志脱敏,需覆盖极验私钥 geetest_key,避免明文写入日志
+        redacted[key] = /password|secret|token|api[_-]?key|geetest_key|auth/i.test(key) ? '***' : value;
     }
     return redacted;
 }
@@ -3562,12 +3563,19 @@ async function getSystemConfigs(req, res) {
         const isSensitive = (key) => /password|secret|token|api[_-]?key|auth/i.test(key);
         const result = {};
         configs.forEach(c => {
-            if (isSensitive(c.config_key)) {
+            // 修复: 敏感配置统一掩码,额外覆盖极验私钥 geetest_key(普通 *_key 只有 api_key 形态才会被命中)
+            if (isSensitive(c.config_key) || c.config_key === 'geetest_key') {
                 result[c.config_key] = c.config_value ? '******' : '';
             } else {
                 result[c.config_key] = c.config_value;
             }
         });
+        // 修复: 极验 id/key 支持 env 回退,与运行时 geetestService.getConfig / geetestRoutes./config 保持一致。
+        // 否则当 captcha_id/私钥配置在 .env 而 DB 未写入时,面板会显示空/默认,导致"显示与真实不一致"的误判。
+        const envGeetestId = process.env.GEETEST_ID || '';
+        const envGeetestKey = process.env.GEETEST_KEY || '';
+        if (!result.geetest_id) result.geetest_id = envGeetestId;
+        if (!result.geetest_key && envGeetestKey) result.geetest_key = '******'; // DB 空但 env 有私钥,仍显示已配置
         return successResponse(res, result);
     } catch (error) {
         console.error('获取系统设置错误:', error);
@@ -3642,7 +3650,7 @@ async function updateSystemConfig(req, res) {
         logOperation(req, 'update_config', 'system_config', null, redactConfigDetails({ [key]: value }));
         // 修复: 敏感配置不返回明文,统一掩码
         // 修复 P1-8: 敏感配置不返回明文,统一掩码
-        const isSensitive = (k) => /password|secret|token|api[_-]?key|auth/i.test(k);
+        const isSensitive = (k) => /password|secret|token|api[_-]?key|auth/i.test(k) || k === 'geetest_key';
         if (isSensitive(key)) {
             return successResponse(res, {
                 config_key: updatedConfig.config_key,

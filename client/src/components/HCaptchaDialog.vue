@@ -161,7 +161,10 @@ const onVerify = async (token) => {
       }
     }
   } catch (e) {
-    error.value = '验证失败，请重试'
+    // 修复: 后端 verify 校验失败时返回 HTTP 400,axios 侧为异常分支。
+    // 原逻辑只显示通用文案,把 hCaptcha 官方的具体失败原因(如 invalid-input-secret)
+    // 吞掉,用户/开发者无法判断是 secret 填错还是 token 无效。这里从响应里取出真实原因展示。
+    error.value = e?.response?.data?.msg || '验证失败，请重试'
     if (window.hcaptcha && widgetId.value !== null) {
       window.hcaptcha.reset(widgetId.value)
     }

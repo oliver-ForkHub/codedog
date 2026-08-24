@@ -39,9 +39,17 @@ exec('git', ['fetch', '--prune', 'origin']);
 exec('git', ['merge', '--ff-only', `origin/${branch}`]);
 if (process.platform !== 'win32') {
   const entry = path.join(root, 'im.sh'), target = '/usr/local/bin/codedogim';
-  fs.chmodSync(entry, 0o755);
-  try { fs.unlinkSync(target); } catch (error) { if (error.code !== 'ENOENT') throw error; }
-  fs.symlinkSync(entry, target);
+  try {
+    fs.chmodSync(entry, 0o755);
+    // 修复: 用 rmSync(force) 兼容已有/不存在的软链,避免 ENOENT 分支。
+    fs.rmSync(target, { force: true });
+    fs.symlinkSync(entry, target);
+    console.log('已更新全局命令 codedogim。');
+  } catch (error) {
+    // 修复: /usr/local/bin 属 root,非管理员进程会 EPERM。全局命令只是辅助入口,
+    // 不应因权限不足中断核心部署(备份/构建/上线)。降级为告警,稍后手动处理即可。
+    console.error(`[警告] 更新全局命令 ${target} 失败（${error.code}），不影响本次部署。如需更新请执行：sudo ln -sf ${entry} ${target}`);
+  }
 }
 const after = exec('git', ['rev-parse', 'HEAD'], repo, true);
 const deployedRevision = fs.existsSync(deployedRevisionFile) ? fs.readFileSync(deployedRevisionFile, 'utf8').trim() : '';

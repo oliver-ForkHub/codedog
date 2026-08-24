@@ -87,7 +87,10 @@ function setSecurityHeaders(res) {
         "img-src 'self' data: https: http:",
         "font-src 'self' data: https:",
         "connect-src 'self' https://*.codemao.cn wss://*.codemao.cn https://*.geetest.com https://hcaptcha.com https://*.hcaptcha.com https://cloudflareinsights.com",
-        "frame-src 'self' https://*.codemao.cn https://hcaptcha.com/",
+        // 修复: frame-src 之前只放行 https://hcaptcha.com/(无子域通配),而 hCaptcha 验证框 iframe
+        // 实际加载自 newassets.hcaptcha.com 等子域 → widget 被 CSP 阻断,弹窗只有阴影、渲染不出验证码。
+        // 与 script-src/connect-src 一致地放行 *.hcaptcha.com。
+        "frame-src 'self' https://*.codemao.cn https://hcaptcha.com https://*.hcaptcha.com",
         "form-action 'self'"
     ].join('; '));
 }

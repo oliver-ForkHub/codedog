@@ -15,10 +15,16 @@ class GeetestService {
             DbAdapter.findOne(SystemConfig, { where: { config_key: 'geetest_enabled' } })
         ]);
 
+        const geetestId = (idConfig && idConfig.config_value) || GEETEST_ID;
+        const geetestKey = (keyConfig && keyConfig.config_value) || GEETEST_KEY;
+
         return {
-            geetestId: (idConfig && idConfig.config_value) || GEETEST_ID,
-            geetestKey: (keyConfig && keyConfig.config_value) || GEETEST_KEY,
-            enabled: (enabledConfig && enabledConfig.config_value) === 'true'
+            geetestId,
+            geetestKey,
+            // 修复: enabled 需同时满足 整体开关为 true 且 验证 ID 非空,与 /config 接口判定完全一致。
+            // 否则会出现 enabled=true 但 id 为空时:后端拿空 id 调极验必然失败(misconfigured),
+            // 而前端认为未启用不弹验证码,导致"要求验证却无码"的通关失败。
+            enabled: ((enabledConfig && enabledConfig.config_value) === 'true') && !!geetestId
         };
     }
 

@@ -36,11 +36,9 @@ async function hcaptchaGuard(req, res, next) {
         return next();
     }
 
-    // 修复 L8: 移除 /api/admin —— 管理端由 JWT + requireAdmin 保护,无需绕过验证码
+    // 管理端( /api/admin )与站点其它 /api 一致,同样受 hCaptcha 全站保护。
+    // 若被验证码锁住无法进入后台,可通过服务器终端关闭 hcaptcha_enabled 或临时放行来恢复。
     const excludePaths = [
-        // 修复 E1: /api/admin 必须前置排除。管理端开启 hCaptcha 后若被本中间件拦截,
-        // 管理员会被自己的全站验证码锁在后台外(403 且无法弹窗点击关闭),必须保证管理员总能进入后台。
-        '/api/admin',
         '/api/users/login',
         '/api/users/register',
         '/api/users/logout',

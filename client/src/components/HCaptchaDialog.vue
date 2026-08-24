@@ -53,7 +53,11 @@ const loadScript = () => {
     }
 
     const script = document.createElement('script')
-    script.src = 'https://js.hcaptcha.com/1/api.js'
+    // 采用显式渲染(render=explicit): 与本组件用 window.hcaptcha.render() 手动渲染一致,
+    // 以避免 EXPLICIT 与 AUTO 模式混用可能导致的渲染不到容器(弹窗只有阴影/占位)。
+    // 注意: 该域为境外 CDN,若当前环境加载失败(网络错误/超时),需在代理/网关侧放行下述域名:
+    //   js.hcaptcha.com / newassets.hcaptcha.com / hcaptcha.com
+    script.src = 'https://js.hcaptcha.com/1/api.js?render=explicit'
     script.async = true
     script.defer = true
     script.dataset.hcaptchaLoader = 'true'

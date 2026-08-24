@@ -62,7 +62,13 @@ const loadScript = () => {
     script.defer = true
     script.dataset.hcaptchaLoader = 'true'
     script.onload = resolve
-    script.onerror = () => reject(new Error('hCaptcha 脚本加载失败'))
+    script.onerror = () => {
+      // 修复: 加载失败必须移除该 script 节点。
+      // 否则该节点残留且不会重新加载,用户点「重试」时会命中此失效节点,
+      // 只挂上 load 监听却永远等不到,导致弹窗一直转圈、弹不出验证码。
+      script.remove()
+      reject(new Error('hCaptcha 脚本加载失败，请检查网络后重试'))
+    }
     document.head.appendChild(script)
   })
 }

@@ -5828,6 +5828,9 @@ onMounted(() => {
   fetchStats()
   fetchTrends()
   loadProxyConfig()
+  // 修复：刷新后开关显示关闭——校验配置(极验场景/hCaptcha等)只在点击「系统配置」菜单时才拉取,
+  // 刷新回到默认菜单时 configForm 仍为初始值。这里在挂载时主动拉取一次,保证配置项与数据库一致。
+  fetchConfigs()
   if (userStore.user?.role === 'superadmin') {
     fetchRoles()
     fetchAdminUsers()

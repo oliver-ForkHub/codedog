@@ -23,10 +23,21 @@ async function isHcaptchaEnabled() {
     }
 
     // 故意不吞异常:DB 故障应让上层 catch 返回 503,而不是降级为 false 放行
-    const enabledConfig = await DbAdapter.findOne(SystemConfig, { where: { config_key: 'hcaptcha_enabled' } });
-    // 修复: 用 !! 强制转为布尔值,避免 enabledConfig 为 null 时缓存值为 null,
-    // 与哨兵值 null 冲突导致缓存永不命中
-    hcaptchaEnabledCache = !!(enabledConfig && enabledConfig.config_value === 'true');
+    // 修复: 同时读取 site_key / secret_key,校验 hCaptcha 是否真正"配置完整可用"。
+    // 此前只判断 hcaptcha_enabled,导致"开关开着但 site_key 为空"时仍对 /api/*(含管理端)强制 403:
+    //   后端全站拦截 → 前端管理后台所有接口读取失败 → 面板全部退化为初始默认值(开关/场景/site_key 全显示关闭或空),
+    //   且前端弹窗因 site key 为空抛"未配置"无法完成验证 → 管理员被永久锁死,只能靠终端关 hcaptcha_enabled 恢复。
+    const [enabledConfig, siteKeyConfig, secretKeyConfig] = await Promise.all([
+        DbAdapter.findOne(SystemConfig, { where: { config_key: 'hcaptcha_enabled' } }),
+        DbAdapter.findOne(SystemConfig, { where: { config_key: 'hcaptcha_site_key' } }),
+        DbAdapter.findOne(SystemConfig, { where: { config_key: 'hcaptcha_secret_key' } })
+    ]);
+    // 修复: 开启判定 = 开关为 true 且 site_key / secret_key 均非空(与 geetestService.getConfig 的
+    // enabled 判定"开关 && id 非空"口径一致)。配置不完整相当于未启用,全站放行对待。
+    // 说明: 此处仅针对"配置不完整"这一正常状态放行;DB 读取抛异常等故障仍会走上方注释的 503 fail-closed。
+    hcaptchaEnabledCache = !!(enabledConfig && enabledConfig.config_value === 'true'
+        && siteKeyConfig && siteKeyConfig.config_value
+        && secretKeyConfig && secretKeyConfig.config_value);
     hcaptchaCacheExpiry = now + HCAPTCHA_CACHE_TTL;
     return hcaptchaEnabledCache;
 }

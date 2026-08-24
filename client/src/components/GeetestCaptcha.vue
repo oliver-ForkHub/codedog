@@ -84,7 +84,15 @@ const init = async () => {
     const product = configRes.data.product || 'popup'
     
     // 先确保极验4脚本就绪,再初始化
-    await loadGt4Script()
+    // 修复: 对外部脚本加载加 12s 超时兜底。该脚本来自 static.geetest.com,
+    // 在境外网络下可能长时间挂起(既不 load 也不 error),原代码会在这里无限等待,
+    // 导致验证码永不渲染、captchaObj 恒为空、登录页永久空白且点登录无任何反应。
+    await Promise.race([
+      loadGt4Script(),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('验证码脚本加载超时，请检查网络后重试')), 12000)
+      )
+    ])
     loadCaptcha(captchaId, product)
   } catch (e) {
     error.value = e.message || '验证码初始化失败'
@@ -164,10 +172,16 @@ const reset = () => {
 }
 
 const verify = () => {
-  // GT4 手动触发验证弹窗使用 showCaptcha()
-  if (captchaObj.value) {
-    captchaObj.value.showCaptcha()
+  // 修复: captchaObj 未就绪(初始化未完成/加载失败)时不能静默空转,
+  // 原代码直接无操作,导致登录页"点了登录既看不到验证码、也不发登录请求"。
+  // 改为在组件内显示明确错误提示,让用户知道是验证码还没准备好而非登录失效。
+  if (!captchaObj.value) {
+    error.value = '验证码尚未加载完成，请稍候重试或点上方重试'
+    loading.value = false
+    return
   }
+  // GT4 手动触发验证弹窗使用 showCaptcha()
+  captchaObj.value.showCaptcha()
 }
 
 onMounted(() => {

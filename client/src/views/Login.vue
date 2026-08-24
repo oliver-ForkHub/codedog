@@ -97,6 +97,9 @@ const loading = ref(false)
 const geetestRef = ref(null)
 const geetestEnabled = ref(true)
 const geetestValidated = ref(false)
+// popup 型极验: 首次点登录只弹窗不提交,验证成功后需二次点击才发起登录请求,
+// 常被用户当成"点击没反应"。用一个标志在验证成功后自动再次提交登录。
+let autoSubmitLogin = false
 
 const form = reactive({
   username: '',
@@ -118,6 +121,12 @@ const onGeetestReady = (data) => {
 
 const onGeetestSuccess = () => {
   geetestValidated.value = true
+  // 修复: popup 极验验证通过后,若本次点击是由登录触发,则自动再次提交登录请求,
+  // 免去"必须先点一次登录弹窗、再点一次才发送请求"的二次点击,避免被误判为登录没反应。
+  if (autoSubmitLogin) {
+    autoSubmitLogin = false
+    handleLogin()
+  }
 }
 
 const handleLogin = async () => {
@@ -126,10 +135,13 @@ const handleLogin = async () => {
   
   if (geetestEnabled.value && !geetestValidated.value) {
     // popup 是弹窗型：GeetestCaptcha 未内嵌 appendTo，点击登录时触发 showCaptcha 弹窗
+    // 标记本次点击旨在弹窗，验证成功后由 onGeetestSuccess 自动继续提交
+    autoSubmitLogin = true
     if (geetestRef.value) geetestRef.value.verify()
     return
   }
   
+  autoSubmitLogin = false
   loading.value = true
   try {
     const geetestData = geetestEnabled.value && geetestRef.value ? geetestRef.value.getValidateData() : {}

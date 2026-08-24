@@ -82,7 +82,19 @@ router.post('/verify', hcaptchaVerifyRateLimit, async (req, res) => {
             return errorResponse(res, 'hCaptcha未配置', 500);
         }
         
-        const expireMinutes = parseInt(expireConfig?.config_value) || 20;
+        // 修复边界 bug: 原 `parseInt(config_value) || 20` 在输入为 "0" 时因 0 是 falsy
+        // 会错误回退成默认 20,导致管理员无法关闭"免签窗口"。
+        // 语义: 正整数=验证通过后 N 分钟免签; "0"=通过后立即失效(每次操作都需重新验证);
+        //       未配置或非法值(=NaN/负数)=用默认 20 分钟。
+        let expireMinutes = 20;
+        if (expireConfig && expireConfig.config_value) {
+            const parsed = parseInt(expireConfig.config_value, 10);
+            if (Number.isFinite(parsed) && parsed >= 0) {
+                expireMinutes = parsed;
+            }
+        }
+        // expireMinutes 为 0 时, expiresAt = Date.now(),中间件判断 Date.now() < expiresAt 恒为 false,
+        // 从而每次请求都会强制重新验证,符合"0 = 关闭免签"的预期。
         
         const hcaptcha = new HCaptchaService(secretKeyConfig.config_value);
         const result = await hcaptcha.verify(token);

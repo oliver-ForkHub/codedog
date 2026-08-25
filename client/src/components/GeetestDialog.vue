@@ -4,8 +4,10 @@
     title="安全验证"
     width="400px"
     :close-on-click-modal="false"
+    :close-on-press-escape="false"
     destroy-on-close
     @open="onOpen"
+    @closed="cancel"
   >
     <div v-if="loading" class="geetest-dialog--loading">
       <el-icon class="is-loading"><Loading /></el-icon>
@@ -18,7 +20,7 @@
     </div>
     <div ref="captchaBox" class="geetest-dialog--box"></div>
     <template #footer>
-      <el-button @click="visible = false">取消</el-button>
+      <el-button @click="cancel">取消</el-button>
     </template>
   </el-dialog>
 </template>
@@ -52,7 +54,12 @@ const loadGt4Script = () => {
     script.src = 'https://static.geetest.com/v4/gt4.js'
     script.dataset.gt4Loader = 'true'
     script.onload = () => resolve()
-    script.onerror = () => reject(new Error('极验4脚本加载失败'))
+    script.onerror = () => {
+      // 修复 M07：加载失败移除失效 script 节点并重置缓存，否则重试会命中失效节点永远挂起。
+      script.remove()
+      gt4ScriptPromise = null
+      reject(new Error('极验4脚本加载失败'))
+    }
     document.head.appendChild(script)
   })
   return gt4ScriptPromise
@@ -93,19 +100,34 @@ const initCaptcha = async () => {
     
     const captchaId = registerRes.data.captcha_id
     const product = configRes.data.product || 'popup'
-    
+
     // 先确保极验4脚本就绪,再初始化
-    await loadGt4Script()
+    // 修复 M10：对脚本加载加 12s 超时兜底（与 GeetestCaptcha.vue 一致），
+    // 半连接下既不 load 也不 error 时避免永久挂起。
+    await Promise.race([
+      loadGt4Script(),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('验证码脚本加载超时，请检查网络后重试')), 12000)
+      )
+    ])
     loadCaptcha(captchaId, product)
   } catch (e) {
     error.value = e.message || '验证码初始化失败'
     loading.value = false
-    // 初始化失败时主动 resolve,避免调用方永远等待
-    if (resolvePromise.value) {
-      resolvePromise.value({})
-      resolvePromise.value = null
-    }
+    // 修复 M09：初始化失败时不再提前 resolve({}) 并清空 resolvePromise。
+    // 此前提前 resolve 后用户点「重试」即使验证成功，onSuccess 因 resolvePromise 已为空
+    // 无法把验证字段回传调用方。现在仅显示错误+重试按钮，保留调用上下文，让真正重试能完成原操作。
   }
+}
+
+// 修复 M08：统一取消/关闭路径 settle(null)，避免调用方 Promise 永挂。
+// cancel 同时关闭弹窗（设置 visible=false），@closed 回调再做幂等兜底（此时 resolvePromise 已为空）。
+const cancel = () => {
+  if (resolvePromise.value) {
+    resolvePromise.value(null)
+    resolvePromise.value = null
+  }
+  visible.value = false
 }
 
 const loadCaptcha = (captchaId, product) => {
@@ -191,8 +213,9 @@ onUnmounted(() => {
     try { captchaObj.value.destroy() } catch (e) { /* ignore */ }
     captchaObj.value = null
   }
+  // 修复 M08：卸载时统一按取消语义 settle(null)，避免调用方永挂
   if (resolvePromise.value) {
-    resolvePromise.value({})
+    resolvePromise.value(null)
     resolvePromise.value = null
   }
 })

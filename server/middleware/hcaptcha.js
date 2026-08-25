@@ -2,44 +2,17 @@
  * hCaptcha验证中间件
  */
 
-const DbAdapter = require('../utils/dbAdapter');
-const { SystemConfig } = require('../models');
 const { errorResponse } = require('../middleware/response');
-const axios = require('axios');
-
-let hcaptchaEnabledCache = null;
-let hcaptchaCacheExpiry = 0;
-const HCAPTCHA_CACHE_TTL = 60 * 1000;
+const { getConfig, invalidateHcaptchaCache } = require('../services/hcaptchaService');
+const { HCaptchaService } = require('../services/hcaptcha');
 
 /**
- * 查询 hCaptcha 是否启用
- * 修复 H1 fail-open: DB 故障时抛出异常(不再吞掉),由 hcaptchaGuard 的 catch 统一返回 503,
- * 避免首次调用 cache 为 null 时被当作 false 直接放行
+ * hCaptcha 是否启用的唯一运行时判断（代理到 hcaptchaService.getConfig）。
+ * DB 故障时 getConfig 抛异常，由 hcaptchaGuard 的 catch 统一返回 503 fail-closed。
  */
 async function isHcaptchaEnabled() {
-    const now = Date.now();
-    if (hcaptchaEnabledCache !== null && now < hcaptchaCacheExpiry) {
-        return hcaptchaEnabledCache;
-    }
-
-    // 故意不吞异常:DB 故障应让上层 catch 返回 503,而不是降级为 false 放行
-    // 修复: 同时读取 site_key / secret_key,校验 hCaptcha 是否真正"配置完整可用"。
-    // 此前只判断 hcaptcha_enabled,导致"开关开着但 site_key 为空"时仍对 /api/*(含管理端)强制 403:
-    //   后端全站拦截 → 前端管理后台所有接口读取失败 → 面板全部退化为初始默认值(开关/场景/site_key 全显示关闭或空),
-    //   且前端弹窗因 site key 为空抛"未配置"无法完成验证 → 管理员被永久锁死,只能靠终端关 hcaptcha_enabled 恢复。
-    const [enabledConfig, siteKeyConfig, secretKeyConfig] = await Promise.all([
-        DbAdapter.findOne(SystemConfig, { where: { config_key: 'hcaptcha_enabled' } }),
-        DbAdapter.findOne(SystemConfig, { where: { config_key: 'hcaptcha_site_key' } }),
-        DbAdapter.findOne(SystemConfig, { where: { config_key: 'hcaptcha_secret_key' } })
-    ]);
-    // 修复: 开启判定 = 开关为 true 且 site_key / secret_key 均非空(与 geetestService.getConfig 的
-    // enabled 判定"开关 && id 非空"口径一致)。配置不完整相当于未启用,全站放行对待。
-    // 说明: 此处仅针对"配置不完整"这一正常状态放行;DB 读取抛异常等故障仍会走上方注释的 503 fail-closed。
-    hcaptchaEnabledCache = !!(enabledConfig && enabledConfig.config_value === 'true'
-        && siteKeyConfig && siteKeyConfig.config_value
-        && secretKeyConfig && secretKeyConfig.config_value);
-    hcaptchaCacheExpiry = now + HCAPTCHA_CACHE_TTL;
-    return hcaptchaEnabledCache;
+    const config = await getConfig();
+    return config.enabled;
 }
 
 async function hcaptchaGuard(req, res, next) {
@@ -93,23 +66,17 @@ async function hcaptchaGuard(req, res, next) {
     }
 }
 
-async function verifyHcaptcha(token, secret) {
+/**
+ * 服务端 hCaptcha token 二次校验（中间件内复用）。
+ * 修复 M03：向 siteverify 提交 remoteip（req.ip）与预期 sitekey（服务端配置，不信任客户端）。
+ */
+async function verifyHcaptcha(token, secret, siteKey, remoteip) {
     try {
-        // 修复: secret 放在请求体而非 URL params,避免被代理/负载均衡器日志泄露
-        const params = new URLSearchParams();
-        params.append('secret', secret);
-        params.append('response', token);
-        const response = await axios.post('https://api.hcaptcha.com/siteverify', params.toString(), {
-            timeout: 10000
-        });
-        // 修复 L9: 日志不再打印整个 response.data,只打印布尔结果,避免泄露
-        console.log('[hCaptcha] 验证结果:', response.data?.success);
-        // 修复: 统一使用可选链 + 强制布尔值,避免 response.data 为 null 时抛 TypeError
-        return !!response.data?.success;
+        const hcaptcha = new HCaptchaService(secret, siteKey);
+        const result = await hcaptcha.verify(token, { remoteip, sitekey: siteKey });
+        return result.success;
     } catch (error) {
         if (error.response) {
-            // 修复: 错误日志不打印完整 response.data,只打印状态码和错误码,避免泄露
-            // 修复: hCaptcha API 返回字段名是 error-codes(连字符),不是 error_codes(下划线)
             console.error('hCaptcha验证失败:', error.response.status, error.response.data?.success, error.response.data?.['error-codes']);
         } else {
             console.error('hCaptcha验证失败:', error.message);
@@ -118,9 +85,4 @@ async function verifyHcaptcha(token, secret) {
     }
 }
 
-function invalidateHcaptchaCache() {
-    hcaptchaEnabledCache = null;
-    hcaptchaCacheExpiry = 0;
-}
-
-module.exports = { hcaptchaGuard, verifyHcaptcha, invalidateHcaptchaCache };
+module.exports = { hcaptchaGuard, isHcaptchaEnabled, verifyHcaptcha, invalidateHcaptchaCache };

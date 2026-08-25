@@ -489,10 +489,18 @@ const checkHCaptcha = async () => {
       const result = await hcaptchaDialogRef.value.show()
       if (result?.verified) {
         hcaptchaVerified.value = true
+        // 修复 H04：通知 request 拦截器重放在验证期间被 hCaptcha 拦截的待重放请求
+        window.dispatchEvent(new CustomEvent('hcaptcha-verified'))
+      } else {
+        // 修复（子代理复审）：取消/关闭弹窗时也需通知 request 拦截器，
+        // 否则队列里的待重放请求的 Promise 永不 settle，调用方（如 fetchConfigs）永久挂起。
+        window.dispatchEvent(new CustomEvent('hcaptcha-cancelled'))
       }
     }
   } catch (e) {
     console.error('hCaptcha检查失败:', e)
+    // 修复（子代理复审）：状态检查/弹窗异常时同样释放队列，避免待重放请求永挂。
+    window.dispatchEvent(new CustomEvent('hcaptcha-cancelled'))
   } finally {
     isCheckingHCaptcha = false
   }

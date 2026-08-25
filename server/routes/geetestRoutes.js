@@ -58,11 +58,12 @@ router.get('/config', async (req, res) => {
         });
         
         // 修复: 与 geetestService.getConfig 保持一致——id 支持回退到环境变量。
-        // 原来只认 DB id,若 captcha_id 配置在环境变量(GEETEST_ID)会导致前端判定
-        // enabled:false(不弹验证码),而后端 verify 判定 enabled:true(强制验证),
-        // 出现"要求验证却无验证码"的通关失败。
+        // 修复（子代理复审 CAPTCHA-H03）：enabled 仅表示"整体开关已打开"，不再隐含 id 非空，
+        // 与 geetestService.getConfig() 的 enabled 公式对齐。配置完整性由 verify() 的
+        // misconfigured 分支统一 fail-closed。否则前端看到 enabled:false 不弹验证码，
+        // 后端却 enabled:true 拒绝"配置不完整"，用户在 UI 侧无法满足验证，形成死结。
         const geetestId = configMap.geetest_id || GEETEST_ID;
-        const enabled = configMap.geetest_enabled === 'true' && !!geetestId;
+        const enabled = configMap.geetest_enabled === 'true';
         
         return successResponse(res, {
             enabled,

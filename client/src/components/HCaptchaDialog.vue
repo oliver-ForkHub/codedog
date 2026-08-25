@@ -52,24 +52,46 @@ const loadScript = () => {
       return
     }
 
+    // 修复 M04：使用官方 onload 回调，确保 SDK 全局对象完成初始化后再 resolve，
+    // 比依赖原生 script.onload 更可靠（onload 仅表示脚本下载执行完，不能保证 hcaptcha 已就绪）。
+    const callbackName = '__hcaptchaOnload_' + Date.now()
+    let timeoutId = null
+
+    const cleanup = () => {
+      if (timeoutId) { clearTimeout(timeoutId); timeoutId = null }
+      delete window[callbackName]
+    }
+
+    window[callbackName] = () => {
+      cleanup()
+      resolve()
+    }
+
     const script = document.createElement('script')
     // 采用显式渲染(render=explicit): 与本组件用 window.hcaptcha.render() 手动渲染一致,
     // 以避免 EXPLICIT 与 AUTO 模式混用可能导致的渲染不到容器(弹窗只有阴影/占位)。
     // 注意: 该域为境外 CDN,若当前环境加载失败(网络错误/超时),需在代理/网关侧放行下述域名:
     //   js.hcaptcha.com / newassets.hcaptcha.com / hcaptcha.com
-    script.src = 'https://js.hcaptcha.com/1/api.js?render=explicit'
+    script.src = `https://js.hcaptcha.com/1/api.js?render=explicit&onload=${callbackName}`
     script.async = true
     script.defer = true
     script.dataset.hcaptchaLoader = 'true'
-    script.onload = resolve
     script.onerror = () => {
-      // 修复: 加载失败必须移除该 script 节点。
-      // 否则该节点残留且不会重新加载,用户点「重试」时会命中此失效节点,
-      // 只挂上 load 监听却永远等不到,导致弹窗一直转圈、弹不出验证码。
+      // 修复: 加载失败必须移除该 script 节点，并清理 onload 回调，避免泄漏。
+      cleanup()
       script.remove()
       reject(new Error('hCaptcha 脚本加载失败，请检查网络后重试'))
     }
     document.head.appendChild(script)
+
+    // 修复 M06：脚本加载超时兜底。网络半连接/丢包时既不触发 onload 也不触发 error，
+    // 原 Promise 会永久挂起，弹窗永远转圈。12s 超时后清理并 reject，让用户可点重试。
+    timeoutId = setTimeout(() => {
+      cleanup()
+      script.onerror = null
+      script.remove()
+      reject(new Error('hCaptcha 脚本加载超时，请检查网络后重试'))
+    }, 12000)
   })
 }
 
@@ -122,10 +144,12 @@ const show = (sceneName) => {
   return new Promise((resolve) => {
     resolvePromise.value = resolve
     renderCaptcha().catch((e) => {
+      // 修复 M05：加载/渲染失败时不要 settle() 关闭弹窗。
+      // 此前 catch 立即 settle() 把弹窗关掉，导致 v-if="error" 的「重试」按钮根本看不到。
+      // 现在仅设置 error 保留弹窗，用户可点「重试」重新加载；只有用户取消或验证成功才 settle。
       console.error('hCaptcha 加载失败:', e)
       error.value = e.message || '验证码加载失败，请重试'
       ElMessage.error(error.value)
-      settle({ verified: false, error: error.value })
     })
   })
 }
@@ -133,9 +157,9 @@ const show = (sceneName) => {
 const retry = () => {
   error.value = ''
   renderCaptcha().catch((e) => {
+    // 修复 M05：重试失败同样保留弹窗，不 settle。
     error.value = e.message || '验证码加载失败，请重试'
     ElMessage.error(error.value)
-    settle({ verified: false, error: error.value })
   })
 }
 

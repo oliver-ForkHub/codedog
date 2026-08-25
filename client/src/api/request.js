@@ -18,8 +18,36 @@ const request = axios.create({
 })
 
 let hcaptchaChecking = false
-// 401 防抖标记，避免并发请求同时返回 401 时重复弹窗/跳转
+// 401 防抖标记，避免并发请求返回 401 时重复弹窗/跳转
 let isHandling401 = false
+
+// 修复 H04：被 hCaptcha 拦截的请求进入待重放队列，验证完成后由 'hcaptcha-verified' 事件触发重放。
+// 通过在 config 上打 __hcaptchaRetried 标记保证每请求最多重放一次，避免验证失败/服务异常时无限循环。
+// 同时保存原始 error，在用户取消验证('hcaptcha-cancelled')时取出 reject 给调用方，
+// 否则调用方拿到的 Promise 永不 settle，导致 fetchConfigs 等永久挂起（子代理 bug 复审发现）。
+const pendingHcaptchaQueue = []
+
+function replayPendingHcaptchaRequests() {
+  if (pendingHcaptchaQueue.length === 0) return
+  // 取出当前队列快照后清空，重放期间新产生的 HCAPTCHA_REQUIRED 会重新入队等待下一次验证完成事件
+  const queue = pendingHcaptchaQueue.splice(0)
+  queue.forEach(({ config, resolve, reject }) => {
+    request(config).then(resolve).catch(reject)
+  })
+}
+
+// 修复：用户取消/关闭验证码对话框时，队列里的待重放请求永远等不到 'hcaptcha-verified'，
+// 直接 reject 原始 error 把控制权交回调用方（让它走原本的 catch 分支）。
+function rejectPendingHcaptchaRequests() {
+  if (pendingHcaptchaQueue.length === 0) return
+  const queue = pendingHcaptchaQueue.splice(0)
+  queue.forEach(({ error, reject }) => reject(error))
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('hcaptcha-verified', replayPendingHcaptchaRequests)
+  window.addEventListener('hcaptcha-cancelled', rejectPendingHcaptchaRequests)
+}
 
 request.interceptors.request.use(
   config => {
@@ -52,12 +80,26 @@ request.interceptors.response.use(
       const url = error.config?.url || ''
 
       if (errorCode === 'HCAPTCHA_REQUIRED') {
+        // 修复 H04：将被拦截请求入队，验证完成重放；不再直接 reject 导致配置加载等丢失。
+        // 调用方拿到一个待 resolve 的 Promise，验证成功后重放原请求并 resolve，失败则 reject。
         if (!hcaptchaChecking) {
           hcaptchaChecking = true
           window.dispatchEvent(new CustomEvent('hcaptcha-required'))
           setTimeout(() => { hcaptchaChecking = false }, 5000)
         }
-        return Promise.reject(error)
+        const wasRetried = error.config?.__hcaptchaRetried
+        if (wasRetried) {
+          // 已重放过一次仍被拦截，说明验证未真正完成，交给调用方处理
+          return Promise.reject(error)
+        }
+        return new Promise((resolve, reject) => {
+          pendingHcaptchaQueue.push({
+            config: { ...error.config, __hcaptchaRetried: true },
+            error,
+            resolve,
+            reject
+          })
+        })
       }
 
       if (status === 401) {

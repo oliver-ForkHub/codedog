@@ -3612,6 +3612,11 @@ async function updateSystemConfig(req, res) {
 
         if (['mobile_android_min_version', 'mobile_android_latest_version'].includes(key) && !/^\d+\.\d+\.\d+$/.test(String(value))) return errorResponse(res, '版本号必须是 x.y.z 格式', 400);
         if (key === 'mobile_android_update_url' && !/^https:\/\//i.test(String(value))) return errorResponse(res, 'App 更新地址必须使用 HTTPS', 400);
+        // 修复 L03：有效期严格校验为 0-30 的整数（0=每次验证，上限对齐 session cookie 30min）
+        if (key === 'hcaptcha_expire_minutes') {
+            const n = Number(value);
+            if (value === '' || value === null || value === undefined || !Number.isInteger(n) || n < 0 || n > 30) return errorResponse(res, '有效期需为 0-30 的整数', 400);
+        }
         let config = await DbAdapter.findOne(SystemConfig, { where: { config_key: key } });
         if (config) {
             await DbAdapter.update(SystemConfig, { config_value: value }, { where: { config_key: key } });
@@ -3619,8 +3624,9 @@ async function updateSystemConfig(req, res) {
             config = await DbAdapter.create(SystemConfig, { config_key: key, config_value: value });
         }
 
-        // 敏感配置修改后，同步清理 hCaptcha 中间件缓存，避免 60s 内仍用旧值
-        if (key === 'hcaptcha_enabled') {
+        // 修复 M01：任意 hcaptcha_* 字段变更都清理 hCaptcha 配置缓存，
+        // 此前仅 hcaptcha_enabled 变更才清理，导致改 site_key/secret_key 后 60s 内仍用旧缓存。
+        if (key.startsWith('hcaptcha_')) {
             try { require('../middleware/hcaptcha').invalidateHcaptchaCache(); } catch (e) {}
         }
         if (key.startsWith('mobile_android_')) require('../middleware/mobileVersion').invalidateMobileVersionCache();
@@ -3696,6 +3702,12 @@ async function batchUpdateConfigs(req, res) {
             if (filteredConfigs[key] !== undefined && !/^\d+\.\d+\.\d+$/.test(String(filteredConfigs[key]))) return errorResponse(res, `${key} 必须是 x.y.z 格式`, 400);
         }
         if (filteredConfigs.mobile_android_update_url !== undefined && !/^https:\/\//i.test(String(filteredConfigs.mobile_android_update_url))) return errorResponse(res, 'App 更新地址必须使用 HTTPS', 400);
+        // 修复 L03：有效期严格校验为 0-30 的整数
+        if (filteredConfigs.hcaptcha_expire_minutes !== undefined) {
+            const v = filteredConfigs.hcaptcha_expire_minutes;
+            const n = Number(v);
+            if (v === '' || v === null || !Number.isInteger(n) || n < 0 || n > 30) return errorResponse(res, '有效期需为 0-30 的整数', 400);
+        }
         if (filteredConfigs.mobile_android_min_version !== undefined && filteredConfigs.mobile_android_latest_version !== undefined) {
             const { compareVersions } = require('../middleware/mobileVersion');
             if (compareVersions(filteredConfigs.mobile_android_latest_version, filteredConfigs.mobile_android_min_version) < 0) return errorResponse(res, '线上最新版本不能低于最低允许版本', 400);
@@ -3753,6 +3765,10 @@ async function batchUpdateConfigs(req, res) {
         }
 
         logOperation(req, 'batch_update_config', 'system_config', null, redactConfigDetails(filteredConfigs));
+        // 修复 M01：批量更新任意 hcaptcha_* 字段后清理缓存（此前批量路径完全未清理）
+        if (Object.keys(filteredConfigs).some(key => key.startsWith('hcaptcha_'))) {
+            try { require('../middleware/hcaptcha').invalidateHcaptchaCache(); } catch (e) {}
+        }
         if (Object.keys(filteredConfigs).some(key => key.startsWith('mobile_android_'))) require('../middleware/mobileVersion').invalidateMobileVersionCache();
         return successResponse(res, null, '更新成功');
     } catch (error) {

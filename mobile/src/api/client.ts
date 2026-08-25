@@ -55,6 +55,10 @@ function captchaScene(path: string, method: string) {
   if (path === '/users/profile') return 'update_profile';
   if (/\/studios\/\d+\/join/.test(path)) return 'join_studio';
   if (/\/studios\/\d+\/works$/.test(path)) return 'submit_work';
+  // 修复 M12：工作室成员/作品审核路径精确映射到 review_member，而非统一兜底为 studio_management。
+  // 此前 path.startsWith('/studios') 兜底过宽，导致 review_member 场景错配。
+  if (/\/studios\/\d+\/members\/\d+\/review/.test(path)) return 'review_member';
+  if (/\/studios\/\d+\/works\/\d+\/review/.test(path)) return 'review_member';
   if (path.startsWith('/studios')) return 'studio_management';
   return 'global';
 }
@@ -68,7 +72,7 @@ function withCaptcha(options: RequestInit, fields: CaptchaFields): RequestInit {
   return { ...options, body: JSON.stringify({ ...existing, ...fields }) };
 }
 
-export async function apiRequest<T>(path: string, options: RequestInit = {}, params?: Record<string, string | number | undefined>, captchaRetried = false): Promise<T> {
+export async function apiRequest<T>(path: string, options: RequestInit = {}, params?: Record<string, string | number | undefined>, hcaptchaAttempted = false, geetestAttempted = false): Promise<T> {
   const query = Object.entries(params || {})
     .filter(([, value]) => value !== undefined && value !== '')
     .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`)
@@ -94,9 +98,13 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}, par
   if (!response.ok || !body || body.code !== 200) {
     if (response.status === 426 && body?.data) upgradeHandler?.(body.data as unknown as UpgradePolicy);
     const message = body?.msg || '';
-    if (!captchaRetried && captchaHandler && /验证码|安全验证/.test(message) && !path.startsWith('/geetest/')) {
-      const fields = await captchaHandler(captchaScene(path, String(options.method || 'GET').toUpperCase()), /hcaptcha/i.test(message) ? 'hcaptcha' : 'geetest');
-      if (fields) return apiRequest<T>(path, withCaptcha(options, fields), params, true);
+    // 修复 M13：拆分 hCaptcha/geetest 两种验证码的重试标记，允许一次操作内顺序完成两种验证。
+    // 此前单一 captchaRetried 布尔在首次 hCaptcha 后置 true，若业务路由再要求极验则无重试机会直接失败。
+    const isHcaptcha = /hcaptcha/i.test(message);
+    const attempted = isHcaptcha ? hcaptchaAttempted : geetestAttempted;
+    if (!attempted && captchaHandler && /验证码|安全验证/.test(message) && !path.startsWith('/geetest/')) {
+      const fields = await captchaHandler(captchaScene(path, String(options.method || 'GET').toUpperCase()), isHcaptcha ? 'hcaptcha' : 'geetest');
+      if (fields) return apiRequest<T>(path, withCaptcha(options, fields), params, isHcaptcha ? true : hcaptchaAttempted, !isHcaptcha ? true : geetestAttempted);
     }
     throw new ApiError(body?.msg || `请求失败（${response.status}）`, response.status);
   }

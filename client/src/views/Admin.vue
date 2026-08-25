@@ -77,7 +77,9 @@
             <el-icon><Monitor /></el-icon>
             <span>实时日志</span>
           </el-menu-item>
-          <el-menu-item index="security" v-if="['admin', 'superadmin'].includes(userStore.user?.role)">
+          <!-- 修复 M16：安全验证配置读取/保存接口仅 superadmin，菜单权限与之对齐，
+               避免普通 admin 进入后 403、显示默认值、误判为配置丢失 -->
+          <el-menu-item index="security" v-if="userStore.user?.role === 'superadmin'">
             <el-icon><Lock /></el-icon>
             <span>安全验证</span>
           </el-menu-item>
@@ -1801,7 +1803,7 @@
           <!-- 固定顶部栏 -->
           <div class="r-admin--configs_sticky">
             <h2 class="r-admin--title">⚙️ 系统设置</h2>
-            <el-button type="primary" size="large" @click="saveConfigs" :loading="savingConfigs">
+            <el-button type="primary" size="large" @click="saveConfigs" :loading="savingConfigs" :disabled="!configLoaded">
               <el-icon class="el-icon--left"><Check /></el-icon>保存全部设置
             </el-button>
           </div>
@@ -2180,7 +2182,7 @@
                 </div>
               </div>
               <el-form-item>
-                <el-button type="primary" @click="saveGeetestConfig" :loading="savingConfigs">保存极验设置</el-button>
+                <el-button type="primary" @click="saveGeetestConfig" :loading="savingConfigs" :disabled="!configLoaded">保存极验设置</el-button>
               </el-form-item>
             </el-form>
           </div>
@@ -2202,11 +2204,11 @@
               <el-input v-model="configForm.hcaptcha_secret_key" type="password" show-password placeholder="hCaptcha Secret Key" />
             </el-form-item>
             <el-form-item label="验证有效期">
-              <el-input-number v-model="hcaptchaExpireMinutes" :min="1" :max="1440" />
-              <span style="margin-left: 10px; color: #999;">分钟（1-1440分钟，即最长24小时）</span>
+              <el-input-number v-model="hcaptchaExpireMinutes" :min="0" :max="30" />
+              <span style="margin-left: 10px; color: #999;">分钟（0=每次验证，最长 30 分钟，受 Session 限制）</span>
             </el-form-item>
             <el-form-item>
-              <el-button type="primary" @click="saveSecurityConfig" :loading="savingConfigs">保存安全验证设置</el-button>
+              <el-button type="primary" @click="saveSecurityConfig" :loading="savingConfigs" :disabled="!configLoaded">保存安全验证设置</el-button>
             </el-form-item>
           </el-form>
           </div>
@@ -3458,6 +3460,8 @@ const configForm = ref({
   mobile_android_update_message: '当前版本已停止服务，请更新后继续使用。'
 })
 const loadingConfigs = ref(false)
+// 修复 H04：标记配置是否成功加载，失败时禁用保存按钮，避免把默认值当真实值覆盖数据库
+const configLoaded = ref(false)
 const hcaptchaExpireMinutes = ref(20)
 const captchaStats = ref(null)
 
@@ -3617,6 +3621,7 @@ const savingConfigs = ref(false)
 
 const fetchConfigs = async () => {
   loadingConfigs.value = true
+  configLoaded.value = false
   try {
     const res = await adminApi.getConfigs()
     if (res.code === 200 && res.data) {
@@ -3667,12 +3672,17 @@ const fetchConfigs = async () => {
       form.mobile_android_latest_version = data.mobile_android_latest_version || '1.1.1'
       form.mobile_android_update_url = data.mobile_android_update_url || 'https://github.com/txcxgzs/codedog/releases/download/mobile-latest/codedog-mobile.apk'
       form.mobile_android_update_message = data.mobile_android_update_message || '当前版本已停止服务，请更新后继续使用。'
-      if (data.hcaptcha_expire_minutes) {
-        hcaptchaExpireMinutes.value = parseInt(data.hcaptcha_expire_minutes) || 20
+      if (data.hcaptcha_expire_minutes !== undefined && data.hcaptcha_expire_minutes !== null && data.hcaptcha_expire_minutes !== '') {
+        // 修复 L01：原 parseInt(x) || 20 在值为 "0" 时因 0 falsy 错误回退成 20，
+        // 致使管理员无法看到/保存"0=每次验证"。改为严格解析，0 是合法值。
+        const n = parseInt(data.hcaptcha_expire_minutes, 10)
+        if (Number.isFinite(n) && n >= 0) hcaptchaExpireMinutes.value = n
       }
+      configLoaded.value = true
     }
   } catch (e) {
     console.error('加载配置失败:', e)
+    // 修复 H04：加载失败保持 configLoaded=false，保存按钮禁用，防止把默认值覆盖真实配置
   } finally {
     loadingConfigs.value = false
   }
@@ -3842,7 +3852,12 @@ const saveConfigs = async () => {
   try {
     // 修复: 全局保存时同步"验证有效期"输入框的独立变量,避免只改有效期后点全局保存不生效、
     // 刷新后看到旧值的"显示与真实不一致"问题(与 saveSecurityConfig 保持一致)
-    configForm.value.hcaptcha_expire_minutes = String(hcaptchaExpireMinutes.value)
+    // 修复（子代理复审）：el-input-number 清空后值为 undefined，String(undefined)='undefined'
+    // 会被服务端新校验拒绝并阻塞整个批次。这里先归一化到合法整数再转字符串。
+    const expireMin = Number.isFinite(hcaptchaExpireMinutes.value) && hcaptchaExpireMinutes.value >= 0 && hcaptchaExpireMinutes.value <= 30
+      ? hcaptchaExpireMinutes.value
+      : 20
+    configForm.value.hcaptcha_expire_minutes = String(expireMin)
     const payload = { ...configForm.value }
     sensitiveConfigKeys.forEach(key => {
       if (MASKED_PLACEHOLDERS.includes(payload[key])) {
@@ -3895,7 +3910,11 @@ const saveGeetestConfig = async () => {
 const saveSecurityConfig = async () => {
   savingConfigs.value = true
   try {
-    configForm.value.hcaptcha_expire_minutes = String(hcaptchaExpireMinutes.value)
+    // 修复（子代理复审）：同 saveConfigs，清空输入框归一化到 20，避免 'undefined' 字符串阻塞批次保存。
+    const expireMin = Number.isFinite(hcaptchaExpireMinutes.value) && hcaptchaExpireMinutes.value >= 0 && hcaptchaExpireMinutes.value <= 30
+      ? hcaptchaExpireMinutes.value
+      : 20
+    configForm.value.hcaptcha_expire_minutes = String(expireMin)
     const securityPayload = Object.fromEntries(
       geetestConfigKeys.map(key => [key, configForm.value[key]])
     )

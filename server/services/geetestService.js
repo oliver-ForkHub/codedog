@@ -21,10 +21,10 @@ class GeetestService {
         return {
             geetestId,
             geetestKey,
-            // 修复: enabled 需同时满足 整体开关为 true 且 验证 ID 非空,与 /config 接口判定完全一致。
-            // 否则会出现 enabled=true 但 id 为空时:后端拿空 id 调极验必然失败(misconfigured),
-            // 而前端认为未启用不弹验证码,导致"要求验证却无码"的通关失败。
-            enabled: ((enabledConfig && enabledConfig.config_value) === 'true') && !!geetestId
+            // 修复 CAPTCHA-H03：enabled 仅表示"整体开关已打开"，不再隐含 id 非空。
+            // 配置完整性（id/key 是否非空）由 verify 中的 misconfigured 分支判断，
+            // 避免"开关开但缺 id"时 enabled=false 被当作"未启用"直接放行。
+            enabled: ((enabledConfig && enabledConfig.config_value) === 'true')
         };
     }
 

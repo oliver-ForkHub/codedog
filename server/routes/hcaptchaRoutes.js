@@ -1,10 +1,10 @@
 const express = require('express');
 const router = express.Router();
-const { SystemConfig, CaptchaStats } = require('../models');
+const { CaptchaStats } = require('../models');
 const { successResponse, errorResponse } = require('../middleware/response');
 const { HCaptchaService } = require('../services/hcaptcha');
+const hcaptchaService = require('../services/hcaptchaService');
 const DbAdapter = require('../utils/dbAdapter');
-const { Op } = require('sequelize');
 const { createRateLimiter } = require('../middleware/rateLimit');
 
 const hcaptchaVerifyRateLimit = createRateLimiter({
@@ -30,20 +30,12 @@ async function recordStats(type, scene, action, req) {
 
 router.get('/config', async (req, res) => {
     try {
-        const configs = await DbAdapter.findAll(SystemConfig, {
-            where: { config_key: { [Op.in]: ['hcaptcha_enabled', 'hcaptcha_site_key'] } }
-        });
-        
-        const configMap = {};
-        configs.forEach(c => {
-            configMap[c.config_key] = c.config_value;
-        });
-        
-        const enabled = configMap.hcaptcha_enabled === 'true' && !!configMap.hcaptcha_site_key;
-        
+        // 修复 CAPTCHA-H02：enabled 统一取自 hcaptchaService.getConfig，
+        // 与 /status、guard 三端共用同一判断（开关 + siteKey + secretKey 全有）。
+        const config = await hcaptchaService.getConfig();
         return successResponse(res, {
-            enabled,
-            site_key: configMap.hcaptcha_site_key || ''
+            enabled: config.enabled,
+            site_key: config.siteKey
         });
     } catch (error) {
         console.error('获取hCaptcha配置错误:', error);
@@ -67,46 +59,34 @@ router.post('/verify', hcaptchaVerifyRateLimit, async (req, res) => {
     try {
         const { token, scene: reqScene } = req.body;
         scene = reqScene || 'global';
-        
+
         if (!token) {
             await recordStats('hcaptcha', scene || 'global', 'fail', req);
             return errorResponse(res, '请完成验证', 400);
         }
-        
-        const [secretKeyConfig, expireConfig] = await Promise.all([
-            DbAdapter.findOne(SystemConfig, { where: { config_key: 'hcaptcha_secret_key' } }),
-            DbAdapter.findOne(SystemConfig, { where: { config_key: 'hcaptcha_expire_minutes' } })
-        ]);
-        
-        if (!secretKeyConfig || !secretKeyConfig.config_value) {
+
+        // 修复 CAPTCHA-H02 / M03 / L03：配置统一从 hcaptchaService 读取，
+        // verify 提交 remoteip 与服务端配置的 sitekey（不信任客户端）。
+        const config = await hcaptchaService.getConfig();
+        if (!config.enabled || !config.secretKey) {
             return errorResponse(res, 'hCaptcha未配置', 500);
         }
-        
-        // 修复边界 bug: 原 `parseInt(config_value) || 20` 在输入为 "0" 时因 0 是 falsy
-        // 会错误回退成默认 20,导致管理员无法关闭"免签窗口"。
-        // 语义: 正整数=验证通过后 N 分钟免签; "0"=通过后立即失效(每次操作都需重新验证);
-        //       未配置或非法值(=NaN/负数)=用默认 20 分钟。
-        let expireMinutes = 20;
-        if (expireConfig && expireConfig.config_value) {
-            const parsed = parseInt(expireConfig.config_value, 10);
-            if (Number.isFinite(parsed) && parsed >= 0) {
-                expireMinutes = parsed;
-            }
-        }
-        // expireMinutes 为 0 时, expiresAt = Date.now(),中间件判断 Date.now() < expiresAt 恒为 false,
-        // 从而每次请求都会强制重新验证,符合"0 = 关闭免签"的预期。
-        
-        const hcaptcha = new HCaptchaService(secretKeyConfig.config_value);
-        const result = await hcaptcha.verify(token);
-        
+
+        const hcaptcha = new HCaptchaService(config.secretKey, config.siteKey);
+        const result = await hcaptcha.verify(token, {
+            remoteip: req.ip,
+            sitekey: config.siteKey
+        });
+
         if (result.success) {
-            const expiresAt = Date.now() + expireMinutes * 60 * 1000;
-            
+            // expireMinutes：0=通过后立即失效（每次操作都需重新验证）；正整数=N 分钟免签。
+            const expiresAt = Date.now() + config.expireMinutes * 60 * 1000;
+
             req.session.hcaptchaVerified = true;
             req.session.hcaptchaExpires = expiresAt;
-            
+
             await recordStats('hcaptcha', scene || 'global', 'pass', req);
-            
+
             return successResponse(res, {
                 verified: true,
                 expires_at: expiresAt
@@ -124,18 +104,17 @@ router.post('/verify', hcaptchaVerifyRateLimit, async (req, res) => {
 
 router.get('/status', async (req, res) => {
     try {
-        const config = await DbAdapter.findOne(SystemConfig, { 
-            where: { config_key: 'hcaptcha_enabled' } 
-        });
-        
-        if (!config || config.config_value !== 'true') {
+        // 修复 CAPTCHA-H02：required 统一取自 hcaptchaService.getConfig().enabled，
+        // 不再仅凭 hcaptcha_enabled 开关，与 /config、guard 一致。
+        const config = await hcaptchaService.getConfig();
+        if (!config.enabled) {
             return successResponse(res, { required: false });
         }
-        
+
         const now = Date.now();
         const expires = req.session.hcaptchaExpires;
         const verified = req.session.hcaptchaVerified && expires && now < expires;
-        
+
         return successResponse(res, {
             required: true,
             verified: !!verified,

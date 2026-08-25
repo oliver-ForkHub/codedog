@@ -382,7 +382,10 @@ const showDetailDialog = async (studio) => {
 
 const handleReviewMember = async (memberId, action) => {
   try {
-    const res = await studioApi.reviewMember(studioDetail.value.id, memberId, action)
+    // 修复 M15：后台审核改用 admin 别名接口（/admin/studios/.../review，requireRole('admin')，无极验），
+    // 此前调用普通 studioApi（走 /studios/.../review，受 review_member/studio_management 极验保护），
+    // 但后台审核页未拉起极验弹窗，开启对应场景后审核必然失败。
+    const res = await adminApi.reviewStudioMember(studioDetail.value.id, memberId, action)
     if (res.code === 200) {
       ElMessage.success(res.msg)
       showDetailDialog(studioDetail.value)
@@ -396,7 +399,8 @@ const handleReviewMember = async (memberId, action) => {
 
 const handleReviewWork = async (workId, action) => {
   try {
-    const res = await studioApi.reviewWork(studioDetail.value.id, workId, action)
+    // 修复 M15：同上，改用 admin 别名接口避免极验场景冲突
+    const res = await adminApi.reviewStudioWork(studioDetail.value.id, workId, action)
     if (res.code === 200) {
       ElMessage.success(res.msg)
       showDetailDialog(studioDetail.value)

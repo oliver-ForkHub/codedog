@@ -111,16 +111,22 @@ async function login(req, res) {
             return errorResponse(res, '请输入用户名和密码', 400);
         }
         
-        const result = await GeetestService.verify(
-            'login', 
-            {
-                lot_number: geetest_lot_number,
-                captcha_output: geetest_captcha_output,
-                pass_token: geetest_pass_token,
-                gen_time: geetest_gen_time
-            }, 
-            req
-        );
+        // 修复: 极验验证已由 geetestVerify('login') 中间件执行并通过,中间件会把已通过场景写入
+        // req.geetestVerifiedScenes。若已打过标记,这里不能再把同一 pass_token 二次提交给极验——
+        // pass_token 是一次性且极短有效期的凭证,重复校验会返回 fail,导致"前端验证通过、登录却被拒绝"。
+        // 此防护与 updateProfile 保持一致;仅有标记缺失时(如极验整体未启用、中间件直接放行)才兜底校验一次。
+        const result = req.geetestVerifiedScenes?.has('login')
+            ? { success: true }
+            : await GeetestService.verify(
+                'login', 
+                {
+                    lot_number: geetest_lot_number,
+                    captcha_output: geetest_captcha_output,
+                    pass_token: geetest_pass_token,
+                    gen_time: geetest_gen_time
+                }, 
+                req
+            );
         
         if (!result.success) {
             cleanupUploadedFile(req.file);

@@ -48,7 +48,12 @@ const loadGt4Script = () => {
     script.src = 'https://static.geetest.com/v4/gt4.js'
     script.dataset.gt4Loader = 'true'
     script.onload = () => resolve()
-    script.onerror = () => reject(new Error('极验4脚本加载失败'))
+    script.onerror = () => {
+      // 修复 M07：加载失败移除失效 script 节点并重置缓存，否则重试命中失效节点永远挂起。
+      script.remove()
+      gt4ScriptPromise = null
+      reject(new Error('极验4脚本加载失败'))
+    }
     document.head.appendChild(script)
   })
   return gt4ScriptPromise

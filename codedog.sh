@@ -864,7 +864,9 @@ do_config() {
             -e 's/^([A-Z_]*_API_KEY)=.*/\1=******/' \
             -e 's/^([A-Z_]*_SECRET)=.*/\1=******/' \
             -e 's/^([A-Z_]*_TOKEN)=.*/\1=******/' \
-            -e 's/^(GEECAPTCHA_ID|GEECAPTCHA_KEY|HCAPTCHA_SECRET|HCAPTCHA_SITEKEY)=.*/\1=******/' \
+            -e 's/^([A-Z_]*_SECRET_KEY)=.*/\1=******/' \
+            -e 's/^([A-Z_]*_PRIVATE_KEY)=.*/\1=******/' \
+            -e 's/^(GEETEST_ID|GEETEST_KEY|HCAPTCHA_SITE_KEY|HCAPTCHA_SECRET_KEY)=.*/\1=******/' \
             "$SCRIPT_DIR/.env"
     else
         echo ".env 文件不存在"
